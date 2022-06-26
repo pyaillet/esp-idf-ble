@@ -1,0 +1,27 @@
+[package]
+name = "esp-ble-example"
+version = "0.1.0"
+authors = ["Pierre-Yves Aillet <pyaillet@gmail.com>"]
+edition = "2021"
+resolver = "2"
+
+[profile.release]
+opt-level = "s"
+incremental = true
+
+[profile.dev]
+debug = true # Symbols are nice and they don't increase the size on Flash
+opt-level = "z"
+incremental = true
+
+[features]
+pio = ["esp-idf-sys/pio"]
+
+[dependencies]
+esp-idf-sys = { version = "0.31.6", features = ["binstart"] }
+
+esp-ble = { path = "../esp-ble/" }
+
+[build-dependencies]
+embuild = "0.29"
+anyhow = "1"
