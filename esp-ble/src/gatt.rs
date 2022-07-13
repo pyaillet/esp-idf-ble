@@ -1,161 +1,183 @@
+use esp_idf_sys::*;
+
+#[repr(u16)]
 #[derive(Copy, Clone)]
-pub enum GattServiceEvent {
-    Register(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_reg_evt_param),
-    Read(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_read_evt_param),
-    Write(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_write_evt_param),
-    ExecWrite(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_exec_write_evt_param),
-    Mtu(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_mtu_evt_param),
-    Confirm(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_conf_evt_param),
-    Unregister(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_create_evt_param),
-    Create(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_create_evt_param),
-    AddIncludedServiceComplete(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_add_incl_srvc_evt_param),
-    AddCharacteristicComplete(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_add_char_evt_param),
-    AddDescriptorComplete(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_add_char_descr_evt_param),
-    DeleteComplete(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_delete_evt_param),
-    StartComplete(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_start_evt_param),
-    StopComplete(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_stop_evt_param),
-    Connect(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_connect_evt_param),
-    Disconnect(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_disconnect_evt_param),
-    Open(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_open_evt_param),
-    Close(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_close_evt_param),
-    Listen(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_congest_evt_param),
-    Congest(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_congest_evt_param),
-    ResponseComplete(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_rsp_evt_param),
-    CreateAttributeTableComplete(
-        esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_add_attr_tab_evt_param,
-    ),
-    SetAttributeValueComplete(esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_set_attr_val_evt_param),
-    SendServiceChangeComplete(
-        esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_send_service_change_evt_param,
-    ),
+pub enum ServiceUuid {
+    GenericAccess = 0x1800,
+    GenericAttribute,
+    ImmediateAlert,
+    LinkLoss,
+    TxPower,
+    CurrentTime,
+    ReferenceTimeUpdate,
+    NextDSTChange = 0x1807,
+    Glucose,
+    HealthThermometer,
+    DeviceInformation,
+    HeartRate = 0x180D,
+    PhoneAlertStatus,
+    Battery,
+    BloodPressure,
+    AlertNotification,
+    HumanInterfaceDevice,
+    ScanParameters,
+    RunningSpeedAndCadence,
+    AutomationIO,
+    CyclingSpeedAndCadence,
+    CyclingPower = 0x1818,
+    LocationAndNavigation,
+    EnvironmentalSensing,
+    BodyComposition,
+    UserData,
+    WeightScale,
+    BondManagement,
+    ContinuousGlucoseMonitoring,
+    InternetProtocolSupport,
+    IndoorPositioning,
+    PulseOximeter,
+    HTTPProxy,
+    TransportDiscovery,
+    ObjectTransfer,
+    FitnessMachine,
+    MeshProvisioning,
+    MeshProxy,
+    ReconnectionConfiguration,
+    InsulinDelivery = 0x183A,
+    BinarySensor,
+    EmergencyConfiguration,
+    PhysicalActivityMonitor = 0x183E,
+    AudioInputControl = 0x1843,
+    VolumeControl,
+    VolumeOffsetControl,
+    CoordinatedSetIdentification,
+    DeviceTime,
+    MediaControl,
+    GenericMediaControl,
+    ConstantToneExtension,
+    TelephoneBearer,
+    GenericTelephoneBearer,
+    MicrophoneControl,
+    AudioStreamControl,
+    BroadcastAudioScan,
+    PublishedAudioCapabilities,
+    BasicAudioAnnouncement,
+    BroadcastAudioAnnouncement,
+    CommonAudio,
+    HearingAccess,
+    TMAS,
+    PublicBroadcastAnnouncement,
 }
 
-impl std::fmt::Debug for GattServiceEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            GattServiceEvent::Register(reg) => write!(
-                f,
-                "Register {{ status: {}, app_id: {} }}",
-                reg.status, reg.app_id
-            ),
-            GattServiceEvent::Read(_read) => write!(f, "Read"),
-            GattServiceEvent::Write(_write) => write!(f, "Write"),
-            GattServiceEvent::ExecWrite(_) => write!(f, "ExecWrite"),
-            GattServiceEvent::Mtu(_) => write!(f, "Mtu"),
-            GattServiceEvent::Confirm(_) => write!(f, "Confirm"),
-            GattServiceEvent::Unregister(_) => write!(f, "Unregister"),
-            GattServiceEvent::Create(_) => write!(f, "Create"),
-            GattServiceEvent::AddIncludedServiceComplete(_) => {
-                write!(f, "AddIncludedServiceComplete")
+pub enum BtUuid {
+    Uuid16(u16),
+    Uuid32(u32),
+    Uuid128([u8; 16]),
+}
+
+impl From<BtUuid> for esp_bt_uuid_t {
+    fn from(svc: BtUuid) -> Self {
+        let mut bt_uuid: esp_bt_uuid_t = Default::default();
+        match svc {
+            BtUuid::Uuid16(uuid) => {
+                bt_uuid.len = 2;
+                bt_uuid.uuid.uuid16 = uuid;
             }
-            GattServiceEvent::AddCharacteristicComplete(_) => {
-                write!(f, "AddCharacteristicComplete")
+            BtUuid::Uuid32(uuid) => {
+                bt_uuid.len = 4;
+                bt_uuid.uuid.uuid32 = uuid;
             }
-            GattServiceEvent::AddDescriptorComplete(_) => write!(f, "AddDescriptorComplete"),
-            GattServiceEvent::DeleteComplete(_) => write!(f, "DeleteComplete"),
-            GattServiceEvent::StartComplete(_) => write!(f, "StartComplete"),
-            GattServiceEvent::StopComplete(_) => write!(f, "StopComplete"),
-            GattServiceEvent::Connect(_) => write!(f, "Connect"),
-            GattServiceEvent::Disconnect(_) => write!(f, "Disconnect"),
-            GattServiceEvent::Open(_) => write!(f, "Open"),
-            GattServiceEvent::Close(_) => write!(f, "Close"),
-            GattServiceEvent::Listen(_) => write!(f, "Listen"),
-            GattServiceEvent::Congest(_) => write!(f, "Congest"),
-            GattServiceEvent::ResponseComplete(_) => write!(f, "ResponseComplete"),
-            GattServiceEvent::CreateAttributeTableComplete(_) => {
-                write!(f, "CreateAttributeTableComplete")
+            BtUuid::Uuid128(uuid) => {
+                bt_uuid.len = 16;
+                bt_uuid.uuid.uuid128 = uuid;
             }
-            GattServiceEvent::SetAttributeValueComplete(_) => {
-                write!(f, "SetAttributeValueComplete")
-            }
-            GattServiceEvent::SendServiceChangeComplete(_) => {
-                write!(f, "SendServiceChangeComplete")
-            }
+        }
+        bt_uuid
+    }
+}
+
+pub struct AttributeValue<const S: usize> {
+    len: usize,
+    value: [u8; S],
+}
+
+impl<const S: usize> From<AttributeValue<S>> for esp_attr_value_t {
+    fn from(mut val: AttributeValue<S>) -> Self {
+        Self {
+            attr_max_len: S as _,
+            attr_len: val.len as _,
+            attr_value: val.value.as_mut_ptr(),
         }
     }
 }
 
-impl GattServiceEvent {
-    pub(crate) unsafe fn build(
-        event: esp_idf_sys::esp_gatts_cb_event_t,
-        param: *mut esp_idf_sys::esp_ble_gatts_cb_param_t,
-    ) -> Self {
-        let param: &esp_idf_sys::esp_ble_gatts_cb_param_t = param.as_ref().unwrap();
-        match event {
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_REG_EVT => {
-                GattServiceEvent::Register(param.reg)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_READ_EVT => {
-                GattServiceEvent::Read(param.read)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_WRITE_EVT => {
-                GattServiceEvent::Write(param.write)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_EXEC_WRITE_EVT => {
-                GattServiceEvent::ExecWrite(param.exec_write)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_MTU_EVT => GattServiceEvent::Mtu(param.mtu),
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_CONF_EVT => {
-                GattServiceEvent::Confirm(param.conf)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_UNREG_EVT => {
-                GattServiceEvent::Unregister(param.create)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_CREATE_EVT => {
-                GattServiceEvent::Create(param.create)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_ADD_INCL_SRVC_EVT => {
-                GattServiceEvent::AddIncludedServiceComplete(param.add_incl_srvc)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_ADD_CHAR_EVT => {
-                GattServiceEvent::AddCharacteristicComplete(param.add_char)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_ADD_CHAR_DESCR_EVT => {
-                GattServiceEvent::AddDescriptorComplete(param.add_char_descr)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_DELETE_EVT => {
-                GattServiceEvent::DeleteComplete(param.del)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_START_EVT => {
-                GattServiceEvent::StartComplete(param.start)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_STOP_EVT => {
-                GattServiceEvent::StopComplete(param.stop)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_CONNECT_EVT => {
-                GattServiceEvent::Connect(param.connect)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_DISCONNECT_EVT => {
-                GattServiceEvent::Disconnect(param.disconnect)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_OPEN_EVT => {
-                GattServiceEvent::Open(param.open)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_CLOSE_EVT => {
-                GattServiceEvent::Close(param.close)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_LISTEN_EVT => {
-                GattServiceEvent::Listen(param.congest)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_CONGEST_EVT => {
-                GattServiceEvent::Congest(param.congest)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_RESPONSE_EVT => {
-                GattServiceEvent::ResponseComplete(param.rsp)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_CREAT_ATTR_TAB_EVT => {
-                GattServiceEvent::CreateAttributeTableComplete(param.add_attr_tab)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_SET_ATTR_VAL_EVT => {
-                GattServiceEvent::SetAttributeValueComplete(param.set_attr_val)
-            }
-            esp_idf_sys::esp_gatts_cb_event_t_ESP_GATTS_SEND_SERVICE_CHANGE_EVT => {
-                GattServiceEvent::SendServiceChangeComplete(param.service_change)
-            }
-            _ => {
-                log::warn!("Unhandled event: {:?}", event);
-                panic!("Unhandled event: {:?}", event)
-            }
+impl<const S: usize> AttributeValue<S> {
+    pub fn new() -> Self {
+        Self {
+            len: S,
+            value: [0; S],
         }
+    }
+
+    pub fn new_with_value(value: &[u8]) -> Self {
+        let actual_len = std::cmp::min(value.len(), S);
+        let mut val = Self {
+            len: S,
+            value: [0; S],
+        };
+        val.value[0..actual_len].copy_from_slice(&value[0..actual_len]);
+        val
+    }
+}
+
+pub enum AutoResponse {
+    ByApp,
+    ByGatt,
+}
+
+impl From<AutoResponse> for esp_attr_control_t {
+    fn from(auto: AutoResponse) -> Self {
+        Self {
+            auto_rsp: match auto {
+                AutoResponse::ByApp => ESP_GATT_RSP_BY_APP,
+                AutoResponse::ByGatt => ESP_GATT_AUTO_RSP,
+            } as _,
+        }
+    }
+}
+
+pub struct GattCharacteristic<const S: usize> {
+    pub(crate) uuid: BtUuid,
+    pub(crate) permissions: esp_gatt_perm_t,
+    pub(crate) property: esp_gatt_char_prop_t,
+    pub(crate) value: AttributeValue<S>,
+    pub(crate) auto_rsp: AutoResponse,
+}
+
+impl<const S: usize> GattCharacteristic<S> {
+    pub fn new(
+        uuid: BtUuid,
+        permissions: esp_gatt_perm_t,
+        property: esp_gatt_char_prop_t,
+        value: AttributeValue<S>,
+        auto_rsp: AutoResponse,
+    ) -> Self {
+        Self {
+            uuid,
+            permissions,
+            property,
+            value,
+            auto_rsp,
+        }
+    }
+}
+
+pub struct GattCharacteristicDesc {
+    pub(crate) uuid: BtUuid,
+    pub(crate) permissions: esp_gatt_perm_t,
+}
+
+impl GattCharacteristicDesc {
+    pub fn new(uuid: BtUuid, permissions: esp_gatt_perm_t) -> Self {
+        Self { uuid, permissions }
     }
 }

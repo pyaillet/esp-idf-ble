@@ -5,4 +5,33 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+
+[patch.crates-io]
+smol = { git = "https://github.com/esp-rs-compat/smol" }
+polling = { git = "https://github.com/esp-rs-compat/polling" }
+socket2 = { git = "https://github.com/esp-rs-compat/socket2" }
+getrandom = { version = "0.2", git = "https://github.com/esp-rs-compat/getrandom.git" }
+
+
+[features]
+default = ["experimental"]
+
+experimental = ["esp-idf-svc/experimental", "esp-idf-hal/experimental", "embedded-svc/experimental"]
+
 [dependencies]
+
+esp-idf-sys = { version = "0.31", features = ["binstart"] }
+esp-idf-svc = "0.42"
+esp-idf-hal = { version = "0.38" }
+
+embedded-svc = "0.22"
+embedded-hal = "0.2"
+
+log = { version = "0.4" }
+
+smol = "1.2"
+
+
+[build-dependencies]
+embuild = "0.29"
+anyhow = "1"
