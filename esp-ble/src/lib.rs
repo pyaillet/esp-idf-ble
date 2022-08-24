@@ -7,6 +7,7 @@ pub mod gatt_server;
 use std::{collections::HashMap, ffi::CString, sync::Arc};
 
 use ::log::*;
+use advertise::RawAdvertiseData;
 
 use esp_idf_svc::nvs::EspDefaultNvs;
 
@@ -40,7 +41,10 @@ static DEFAULT_TAKEN: Mutex<bool> = Mutex::new(false);
 type Singleton<T> = Mutex<Option<T>>;
 
 static GAP_ADV_CONF_DATA: Singleton<Sender<Result<(), EspError>>> = Mutex::new(Option::None);
+static GAP_ADV_CONF_DATA_RAW: Singleton<Sender<Result<(), EspError>>> = Mutex::new(Option::None);
 static GAP_ADV_SCAN_RSP_DATA: Singleton<Sender<Result<(), EspError>>> = Mutex::new(Option::None);
+static GAP_ADV_SCAN_RSP_DATA_RAW: Singleton<Sender<Result<(), EspError>>> =
+    Mutex::new(Option::None);
 static GAP_ADV_START: Singleton<Sender<Result<(), EspError>>> = Mutex::new(Option::None);
 static GATTS_REG_APP: Singleton<HashMap<u16, Sender<Result<esp_gatt_if_t, EspError>>>> =
     Mutex::new(Option::None);
@@ -74,6 +78,12 @@ unsafe extern "C" fn gap_event_handler(
 
     block_on(async {
         match event {
+            GapEvent::RawAdvertisingDatasetComplete(adv) => {
+                event_send!(event, GAP_ADV_CONF_DATA_RAW, esp!(adv.status));
+            }
+            GapEvent::RawScanResponseDatasetComplete(rsp) => {
+                event_send!(event, GAP_ADV_SCAN_RSP_DATA_RAW, esp!(rsp.status));
+            }
             GapEvent::AdvertisingDatasetComplete(adv) => {
                 event_send!(event, GAP_ADV_CONF_DATA, esp!(adv.status));
             }
@@ -82,6 +92,9 @@ unsafe extern "C" fn gap_event_handler(
             }
             GapEvent::AdvertisingStartComplete(start) => {
                 event_send!(event, GAP_ADV_START, esp!(start.status));
+            }
+            GapEvent::UpdateConnectionParamsComplete(params) => {
+                info!("Updated connection params: {:?}", &params);
             }
             _ => warn!("Unhandled event"),
         }
@@ -187,6 +200,18 @@ unsafe extern "C" fn gatts_event_handler(
                     );
                 }
             }
+            GattServiceEvent::Connect(conn) => {
+                let mut conn_params: esp_ble_conn_update_params_t = Default::default();
+                conn_params.bda = conn.remote_bda;
+                conn_params.latency = 0;
+                conn_params.max_int = 0x20; // max_int = 0x20*1.25ms = 40ms
+                conn_params.min_int = 0x10; // min_int = 0x10*1.25ms = 20ms
+                conn_params.timeout = 400; // timeout = 400*10ms = 4000ms
+                                           //
+                info!("Connection from: {:?}", conn);
+
+                let _ = esp!(esp_ble_gap_update_conn_params(&mut conn_params));
+            }
             _ => warn!("Unhandled event"),
         }
     })
@@ -215,6 +240,7 @@ impl EspBle {
         *GATTS_CREATE_SVC.lock() = Some(HashMap::new());
         *GATTS_START_SVC.lock() = Some(HashMap::new());
         *GATTS_ADD_CHAR.lock() = Some(HashMap::new());
+        *GATTS_ADD_CDESC.lock() = Some(HashMap::new());
 
         *taken = true;
         Ok(ble)
@@ -307,6 +333,29 @@ impl EspBle {
         })
     }
 
+    pub async fn configure_advertising_data_raw(
+        &self,
+        data: RawAdvertiseData,
+    ) -> Result<(), EspError> {
+        info!("configure_advertising_data_raw enter");
+
+        let (s, r) = smol::channel::bounded(1);
+
+        let (raw_data, raw_len) = data.as_raw_data();
+
+        if data.set_scan_rsp {
+            *GAP_ADV_SCAN_RSP_DATA_RAW.lock() = Some(s);
+            esp!(unsafe { esp_ble_gap_config_scan_rsp_data_raw(raw_data, raw_len) })?;
+        } else {
+            *GAP_ADV_CONF_DATA_RAW.lock() = Some(s);
+            esp!(unsafe { esp_ble_gap_config_adv_data_raw(raw_data, raw_len) })?;
+        }
+
+        info!("configure_advertising_data_raw exit");
+
+        r.recv().await.unwrap_or(esp!(ESP_ERR_INVALID_STATE))
+    }
+
     pub async fn configure_advertising_data(
         &self,
         data: advertise::AdvertiseData,
@@ -315,13 +364,70 @@ impl EspBle {
 
         let (s, r) = smol::channel::bounded(1);
 
+        let manufacturer_len = data.manufacturer.as_ref().map(|m| m.len()).unwrap_or(0) as u16;
+        let service_data_len = data.service.as_ref().map(|s| s.len()).unwrap_or(0) as u16;
+        #[repr(C, align(4))]
+        struct aligned_uuid {
+            uuid: [u8; 16]
+        }
+        let mut svc_uuid: aligned_uuid = aligned_uuid { uuid: [0; 16] };
+
+        let svc_uuid_len = data
+            .service_uuid
+            .map(|bt_uuid| match bt_uuid {
+                BtUuid::Uuid16(uuid) => {
+                    svc_uuid.uuid[0..2].copy_from_slice(&uuid.to_le_bytes());
+                    2
+                }
+                BtUuid::Uuid32(uuid) => {
+                    svc_uuid.uuid[0..4].copy_from_slice(&uuid.to_le_bytes());
+                    4
+                }
+                BtUuid::Uuid128(uuid) => {
+                    svc_uuid.uuid.copy_from_slice(&uuid);
+                    16
+                }
+                _ => 0,
+            })
+            .unwrap_or(0);
+
+        info!("svc_uuid: {{ {:?} }}", &svc_uuid.uuid);
+        let mut adv_data = esp_ble_adv_data_t {
+            set_scan_rsp: data.set_scan_rsp,
+            include_name: data.include_name,
+            include_txpower: data.include_txpower,
+            min_interval: data.min_interval,
+            max_interval: data.max_interval,
+            manufacturer_len,
+            p_manufacturer_data: data
+                .manufacturer
+                .map_or(std::ptr::null_mut(), |mut m| m.as_mut_ptr()),
+            service_data_len,
+            p_service_data: data
+                .service
+                .map_or(std::ptr::null_mut(), |mut s| s.as_mut_ptr()),
+            service_uuid_len: svc_uuid_len,
+            p_service_uuid: if svc_uuid_len == 0 {
+                std::ptr::null_mut()
+            } else {
+                let ptr = svc_uuid.uuid.as_mut_ptr();
+                unsafe {
+                    info!("0:{:0x}", *ptr as u8);
+                    info!("1:{:0x}", *ptr.add(1) as u8);
+                }
+                ptr
+            },
+            appearance: data.appearance.into(),
+            flag: data.flag,
+        };
+
         if data.set_scan_rsp {
             *GAP_ADV_SCAN_RSP_DATA.lock() = Some(s);
         } else {
             *GAP_ADV_CONF_DATA.lock() = Some(s);
         }
 
-        let mut adv_data: esp_ble_adv_data_t = data.try_into()?;
+        info!("Configuring advertising with {{ {:?} }}", &adv_data);
 
         esp!(unsafe { esp_ble_gap_config_adv_data(&mut adv_data) })?;
 
@@ -336,12 +442,12 @@ impl EspBle {
         let mut adv_param: esp_ble_adv_params_t = esp_ble_adv_params_t {
             adv_int_min: 0x20,
             adv_int_max: 0x40,
-            adv_type: 0x00,
-            own_addr_type: 0x00,
+            adv_type: 0x00,      // ADV_TYPE_IND,
+            own_addr_type: 0x00, // BLE_ADDR_TYPE_PUBLIC,
             peer_addr: [0; 6],
-            peer_addr_type: 0,
-            channel_map: 0x07,
-            adv_filter_policy: 0x00,
+            peer_addr_type: 0x00,    // BLE_ADDR_TYPE_PUBLIC,
+            channel_map: 0x07,       // ADV_CHNL_ALL,
+            adv_filter_policy: 0x00, // ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
         };
         let (s, r) = smol::channel::bounded(1);
 
@@ -388,10 +494,12 @@ impl EspBle {
         svc: GattService,
     ) -> Result<u16, EspError> {
         let gatt_if = application.lock().get_gatt_if()?;
+        let svc_uuid: esp_bt_uuid_t = svc.id.into();
+
         let mut svc_id: esp_gatt_srvc_id_t = esp_gatt_srvc_id_t {
             is_primary: svc.is_primary,
             id: esp_gatt_id_t {
-                uuid: svc.id.into(),
+                uuid: svc_uuid,
                 inst_id: svc.instance_id,
             },
         };
@@ -437,6 +545,7 @@ impl EspBle {
             .and_then(|m| m.insert(svc_handle, s));
 
         let mut uuid = charac.uuid.into();
+
         let mut value = charac.value.into();
         let mut auto_rsp = charac.auto_rsp.into();
 

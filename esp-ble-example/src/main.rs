@@ -2,9 +2,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use esp_ble::advertise::{AdvertiseData, AppearanceCategory};
+use esp_ble::advertise::{AdvertiseData, AdvertiseType, AppearanceCategory, RawAdvertiseData};
 use esp_ble::{
-    AttributeValue, AutoResponse, BtUuid, EspBle, GattApplication, GattCharacteristic, GattCharacteristicDesc, GattService,
+    AttributeValue, AutoResponse, BtUuid, EspBle, GattApplication, GattCharacteristic,
+    GattCharacteristicDesc, GattService,
 };
 use esp_idf_hal::delay;
 use esp_idf_hal::mutex::Mutex;
@@ -32,7 +33,7 @@ fn main() {
 
     delay.delay_us(100_u32);
 
-    let mut ble = EspBle::new("Test device".into(), default_nvs).unwrap();
+    let mut ble = EspBle::new("ESP32".into(), default_nvs).unwrap();
     let application = Arc::new(Mutex::new(GattApplication::new(1)));
     block_on(async {
         let _ = ble
@@ -40,45 +41,70 @@ fn main() {
             .await;
         info!("application registered");
 
-        let svc = GattService::new(BtUuid::Uuid16(0x180A), 4, 1);
+        let svc_uuid = BtUuid::Uuid16(0x00ff);
+
+        let svc = GattService::new(svc_uuid.clone(), 4, 1);
         let svc_handle = ble
             .create_service(application, svc)
             .await
             .expect("Unable to create service");
-        let _ = ble.start_service(svc_handle).await;
+        ble.start_service(svc_handle)
+            .await
+            .expect("Unable to start ble service");
 
         let attr_value: AttributeValue<10> = AttributeValue::new();
         let charac = GattCharacteristic::new(
-            BtUuid::Uuid16(0x2A29),
+            BtUuid::Uuid16(0xff01),
             ESP_GATT_PERM_READ as _,
             ESP_GATT_CHAR_PROP_BIT_READ as _,
             attr_value,
             AutoResponse::ByGatt,
         );
-        let _ = ble.add_characteristic(svc_handle, charac).await;
+        ble.add_characteristic(svc_handle, charac)
+            .await
+            .expect("Unable to add characteristic");
 
-        let cdesc = GattCharacteristicDesc::new(BtUuid::Uuid16(0x2A29), ESP_GATT_PERM_READ as _);
-        let _ = ble.add_characteristic_desc(svc_handle, cdesc).await;
+        let cdesc = GattCharacteristicDesc::new(BtUuid::Uuid16(0x3333), ESP_GATT_PERM_READ as _);
+        ble.add_characteristic_desc(svc_handle, cdesc)
+            .await
+            .expect("Unable to add characteristic");
 
         let adv_data = AdvertiseData {
-            manufacturer: Some("Espressif".into()),
             include_name: true,
-            appearance: AppearanceCategory::Watch,
+            include_txpower: false,
+            min_interval: 6,
+            max_interval: 16,
+            service_uuid: Some(BtUuid::Uuid128([
+                0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0x00,
+                0x00, 0x00,
+            ])),
+            flag: (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT) as _,
             ..Default::default()
         };
-        let _ = ble.configure_advertising_data(adv_data).await;
-
-        let scan_rsp_data = AdvertiseData {
-            set_scan_rsp: true,
-            include_name: true,
-            manufacturer: Some("Espressif".into()),
-            appearance: AppearanceCategory::Watch,
-            ..Default::default()
-        };
-        let _ = ble.configure_advertising_data(scan_rsp_data).await;
+        ble.configure_advertising_data(adv_data)
+            .await
+            .expect("Failed to configure advertising data");
 
         info!("advertising configured");
-        let _ = ble.start_advertise().await;
+
+        let scan_rsp_data = AdvertiseData {
+            include_name: false,
+            include_txpower: true,
+            set_scan_rsp: true,
+            service_uuid: Some(BtUuid::Uuid128([
+                0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0x00,
+                0x00, 0x00,
+            ])),
+            ..Default::default()
+        };
+
+        ble.configure_advertising_data(scan_rsp_data)
+            .await
+            .expect("Failed to configure advertising data");
+
+        ble.start_advertise()
+            .await
+            .expect("Failed to start advertising");
         info!("advertising started");
     });
 
