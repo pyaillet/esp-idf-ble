@@ -37,12 +37,6 @@ jobs:
           toolchain: nightly
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features --examples
-      - name: Annotate commit with clippy warnings no_std
-        uses: actions-rs/clippy-check@v1
-        with:
-          toolchain: nightly
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --no-default-features --examples
 
   doc:
     runs-on: ubuntu-latest
@@ -51,7 +45,7 @@ jobs:
       - name: Stable
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly
       - name: Documentation build
         uses: actions-rs/cargo@v1
         with:
