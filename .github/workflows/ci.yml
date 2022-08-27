@@ -6,26 +6,6 @@ on:
     - main
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Stable
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - name: Release build std
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --all-features
-      - name: Release build examples
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --all-features --examples
-
-
   build-nightly:
     runs-on: ubuntu-latest
     steps:
@@ -34,6 +14,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
+          components: rust-src
       - name: Release build std
         uses: actions-rs/cargo@v1
         with:
@@ -49,7 +30,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
-          components: clippy
+          components: rust-src, clippy
       - name: Annotate commit with clippy warnings std
         uses: actions-rs/clippy-check@v1
         with:
