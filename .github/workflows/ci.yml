@@ -1,0 +1,91 @@
+name: Continuous integration
+on:
+  pull_request:
+  push:
+    branches:
+    - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: Release build std
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features
+      - name: Release build examples
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features --examples
+
+
+  build-nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+      - name: Release build std
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          toolchain: nightly
+          args: --release --all-features --examples
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Nightly with clippy
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: clippy
+      - name: Annotate commit with clippy warnings std
+        uses: actions-rs/clippy-check@v1
+        with:
+          toolchain: nightly
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features --examples
+      - name: Annotate commit with clippy warnings no_std
+        uses: actions-rs/clippy-check@v1
+        with:
+          toolchain: nightly
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --no-default-features --examples
+
+  doc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: Documentation build
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+      - name: Security audit
+        uses: actions-rs/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
