@@ -14,7 +14,10 @@ The goal is to complete the wrapper library and maybe make it usable elsewhere.
 Refer to [this repo](https://github.com/esp-rs/rust-build) to install the custom Rust ESP toolchain.
 You should also install [cargo espflash](https://github.com/esp-rs/espflash) to ease the use of this project.
 
-Then you can launch the following command to compile the project, flash it to your device and monitor the ESP32 serial:
+Then you can launch the following command to compile one of the example, flash it to your device and monitor the ESP32 serial:
 
-`cargo espflash --monitor --speed 921600 /dev/tty.wchusbserial14230`
+`cargo espflash --example <example> --monitor --speed 921600 <device>`
 
+## examples
+
+- [] gatt_server
