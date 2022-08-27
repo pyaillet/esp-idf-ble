@@ -12,6 +12,7 @@ pub struct GattApplication {
     status: GattApplicationStatus,
 }
 
+#[derive(Debug)]
 pub struct GattService {
     pub(crate) is_primary: bool,
     pub(crate) id: BtUuid,

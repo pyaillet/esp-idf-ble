@@ -52,9 +52,9 @@ static GATTS_CREATE_SVC: Singleton<HashMap<esp_gatt_if_t, Sender<Result<u16, Esp
     Mutex::new(Option::None);
 static GATTS_START_SVC: Singleton<HashMap<u16, Sender<Result<(), EspError>>>> =
     Mutex::new(Option::None);
-static GATTS_ADD_CHAR: Singleton<HashMap<u16, Sender<Result<(), EspError>>>> =
+static GATTS_ADD_CHAR: Singleton<HashMap<u16, Sender<Result<u16, EspError>>>> =
     Mutex::new(Option::None);
-static GATTS_ADD_CDESC: Singleton<HashMap<u16, Sender<Result<(), EspError>>>> =
+static GATTS_ADD_CDESC: Singleton<HashMap<u16, Sender<Result<u16, EspError>>>> =
     Mutex::new(Option::None);
 
 macro_rules! event_send {
@@ -173,7 +173,7 @@ unsafe extern "C" fn gatts_event_handler(
                     .map(|m| m.remove(&add.service_handle))
                     .flatten()
                 {
-                    if s.send(esp!(add.status)).await.is_err() {
+                    if s.send(esp!(add.status).map(|_| add.attr_handle)).await.is_err() {
                         error!("Error sending event: {:?}", event);
                     };
                 } else {
@@ -190,7 +190,7 @@ unsafe extern "C" fn gatts_event_handler(
                     .map(|m| m.remove(&add.service_handle))
                     .flatten()
                 {
-                    if s.send(esp!(add.status)).await.is_err() {
+                    if s.send(esp!(add.status).map(|_| add.attr_handle)).await.is_err() {
                         error!("Error sending event: {:?}", event);
                     };
                 } else {
@@ -387,7 +387,6 @@ impl EspBle {
                     svc_uuid.uuid.copy_from_slice(&uuid);
                     16
                 }
-                _ => 0,
             })
             .unwrap_or(0);
 
@@ -414,6 +413,8 @@ impl EspBle {
                 unsafe {
                     info!("0:{:0x}", *ptr as u8);
                     info!("1:{:0x}", *ptr.add(1) as u8);
+                    info!("2:{:0x}", *ptr.add(2) as u8);
+                    info!("3:{:0x}", *ptr.add(3) as u8);
                 }
                 ptr
             },
@@ -532,11 +533,24 @@ impl EspBle {
         r.recv().await.unwrap_or(esp!(ESP_ERR_INVALID_STATE))
     }
 
+    pub fn read_attribute_value(&self, attr_handle: u16) -> Result<Vec<u8>, EspError> {
+        let mut len: u16 = 0;
+        let mut data: *const u8 = std::ptr::null_mut();
+
+        unsafe {
+            esp!(esp_ble_gatts_get_attr_value(attr_handle, &mut len, &mut data))?;
+
+            let data = std::slice::from_raw_parts(data, len as usize);
+            info!("len: {:?}, data: {:p}", len, data);
+            Ok(data.to_vec())
+        }
+    }
+
     pub async fn add_characteristic<const S: usize>(
         &self,
         svc_handle: u16,
         charac: GattCharacteristic<S>,
-    ) -> Result<(), EspError> {
+    ) -> Result<u16, EspError> {
         let (s, r) = smol::channel::bounded(1);
 
         GATTS_ADD_CHAR
@@ -560,14 +574,17 @@ impl EspBle {
             )
         })?;
 
-        r.recv().await.unwrap_or(esp!(ESP_ERR_INVALID_STATE))
+        match r.recv().await {
+            Ok(r) => r,
+            Err(_) => Err(EspError::from(ESP_ERR_INVALID_STATE).unwrap()),
+        }
     }
 
     pub async fn add_characteristic_desc(
         &self,
         svc_handle: u16,
         char_desc: GattCharacteristicDesc,
-    ) -> Result<(), EspError> {
+    ) -> Result<u16, EspError> {
         let (s, r) = smol::channel::bounded(1);
 
         GATTS_ADD_CDESC
@@ -587,6 +604,9 @@ impl EspBle {
             )
         })?;
 
-        r.recv().await.unwrap_or(esp!(ESP_ERR_INVALID_STATE))
+        match r.recv().await {
+            Ok(r) => r,
+            Err(_) => Err(EspError::from(ESP_ERR_INVALID_STATE).unwrap()),
+        }
     }
 }

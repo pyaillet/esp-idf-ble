@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use esp_ble::advertise::{AdvertiseData, AdvertiseType, AppearanceCategory, RawAdvertiseData};
+use esp_ble::advertise::AdvertiseData;
 use esp_ble::{
     AttributeValue, AutoResponse, BtUuid, EspBle, GattApplication, GattCharacteristic,
     GattCharacteristicDesc, GattService,
@@ -41,18 +41,25 @@ fn main() {
             .await;
         info!("application registered");
 
-        let svc_uuid = BtUuid::Uuid16(0x00ff);
+        let svc_uuid = BtUuid::Uuid16(0x00FF);
 
-        let svc = GattService::new(svc_uuid.clone(), 4, 1);
+        let svc = GattService::new_primary(svc_uuid.clone(), 4, 1);
+
+        info!("GattService to be created: {:?}", svc);
+
         let svc_handle = ble
             .create_service(application, svc)
             .await
             .expect("Unable to create service");
+
+        info!("SVC Handle: {:?}", svc_handle);
+
         ble.start_service(svc_handle)
             .await
             .expect("Unable to start ble service");
 
-        let attr_value: AttributeValue<10> = AttributeValue::new();
+        let attr_value: AttributeValue<12> =
+            AttributeValue::new_with_value(&[0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0x57, 0x6F, 0x72, 0x6C, 0x64]);
         let charac = GattCharacteristic::new(
             BtUuid::Uuid16(0xff01),
             ESP_GATT_PERM_READ as _,
@@ -60,14 +67,25 @@ fn main() {
             attr_value,
             AutoResponse::ByGatt,
         );
-        ble.add_characteristic(svc_handle, charac)
+        let char_attr_handle = ble
+            .add_characteristic(svc_handle, charac)
             .await
             .expect("Unable to add characteristic");
 
-        let cdesc = GattCharacteristicDesc::new(BtUuid::Uuid16(0x3333), ESP_GATT_PERM_READ as _);
-        ble.add_characteristic_desc(svc_handle, cdesc)
+        info!("Characteristic Attribute handle: {}", char_attr_handle);
+
+        let data = ble
+            .read_attribute_value(char_attr_handle)
+            .expect("Unable to read characteristic value");
+        info!("Characteristic values: {:?}", data);
+
+        let cdesc = GattCharacteristicDesc::new(BtUuid::Uuid16(ESP_GATT_UUID_CHAR_CLIENT_CONFIG as u16), ESP_GATT_PERM_READ as _);
+        let desc_attr_handle = ble
+            .add_characteristic_desc(svc_handle, cdesc)
             .await
             .expect("Unable to add characteristic");
+
+        info!("Descriptor Attribute handle: {}", desc_attr_handle);
 
         let adv_data = AdvertiseData {
             include_name: true,
@@ -105,6 +123,7 @@ fn main() {
         ble.start_advertise()
             .await
             .expect("Failed to start advertising");
+
         info!("advertising started");
     });
 

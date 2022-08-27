@@ -68,7 +68,7 @@ pub enum ServiceUuid {
     PublicBroadcastAnnouncement,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum BtUuid {
     Uuid16(u16),
     Uuid32(u32),

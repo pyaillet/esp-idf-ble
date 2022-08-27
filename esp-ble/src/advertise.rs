@@ -167,7 +167,7 @@ impl From<&AdvertiseType> for Vec<u8> {
                 let cat: i32 = cat.clone().into();
                 vec![0x02, 0x19, cat as u8]
             }
-            AdvertiseType::TxPower(pow) => {
+            AdvertiseType::TxPower(_pow) => {
                 vec![0x03, 0x0a, 0x09]
             }
         }
