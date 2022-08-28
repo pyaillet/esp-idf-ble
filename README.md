@@ -1,3 +1,6 @@
+![CI](https://github.com/pyaillet/esp-idf-ble/workflows/Continuous%20integration/badge.svg)
+![MIT/Apache-2.0 licensed](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)
+
 # esp-idf-ble
 
 This project use as a workbench to enable BLE on the ESP32 microcontrollers family
