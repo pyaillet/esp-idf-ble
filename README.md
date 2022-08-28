@@ -19,8 +19,15 @@ You should also install [cargo espflash](https://github.com/esp-rs/espflash) to 
 
 Then you can launch the following command to compile one of the example, flash it to your device and monitor the ESP32 serial:
 
-`cargo espflash --example <example> --monitor --speed 921600 <device>`
+`cargo espflash --example <example> --monitor --speed 921600 <device> --target <target>`
 
-## examples
+Targets:
+
+- xtensa-esp32-espidf
+- xtensa-esp32s2-espidf
+- xtensa-esp32s3-espidf
+- riscv32imc-esp-espidf
+
+## Examples
 
 - [ ] gatt_server
