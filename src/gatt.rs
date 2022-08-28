@@ -111,14 +111,16 @@ impl<const S: usize> From<AttributeValue<S>> for esp_attr_value_t {
     }
 }
 
-impl<const S: usize> AttributeValue<S> {
-    pub fn new() -> Self {
+impl<const S: usize> Default for AttributeValue<S> {
+    fn default() -> Self {
         Self {
             len: S,
             value: [0; S],
         }
     }
+}
 
+impl<const S: usize> AttributeValue<S> {
     pub fn new_with_value(value: &[u8]) -> Self {
         let actual_len = std::cmp::min(value.len(), S);
         let mut val = Self {
@@ -182,4 +184,3 @@ impl GattCharacteristicDesc {
         Self { uuid, permissions }
     }
 }
-

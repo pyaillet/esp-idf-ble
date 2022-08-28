@@ -22,7 +22,7 @@ pub use gatt_server::*;
 
 use smol::{channel::Sender, future::block_on};
 
-#[allow(unused)]
+#[allow(unused, clippy::enum_variant_names)]
 #[derive(PartialEq, Eq, Hash)]
 enum GapCallbackType {
     AdvertisingDatasetComplete,
@@ -119,8 +119,7 @@ unsafe extern "C" fn gatts_event_handler(
                 if let Some(s) = GATTS_REG_APP
                     .lock()
                     .as_mut()
-                    .map(|m| m.remove(&register.app_id))
-                    .flatten()
+                    .and_then(|m| m.remove(&register.app_id))
                 {
                     if s.send(param).await.is_err() {
                         error!("Error sending event: {:?}", event);
@@ -133,8 +132,7 @@ unsafe extern "C" fn gatts_event_handler(
                 if let Some(s) = GATTS_CREATE_SVC
                     .lock()
                     .as_mut()
-                    .map(|m| m.remove(&gatts_if))
-                    .flatten()
+                    .and_then(|m| m.remove(&gatts_if))
                 {
                     if s.send(esp!(create.status).map(|_| create.service_handle))
                         .await
@@ -153,8 +151,7 @@ unsafe extern "C" fn gatts_event_handler(
                 if let Some(s) = GATTS_START_SVC
                     .lock()
                     .as_mut()
-                    .map(|m| m.remove(&start.service_handle))
-                    .flatten()
+                    .and_then(|m| m.remove(&start.service_handle))
                 {
                     if s.send(esp!(start.status)).await.is_err() {
                         error!("Error sending event: {:?}", event);
@@ -170,10 +167,12 @@ unsafe extern "C" fn gatts_event_handler(
                 if let Some(s) = GATTS_ADD_CHAR
                     .lock()
                     .as_mut()
-                    .map(|m| m.remove(&add.service_handle))
-                    .flatten()
+                    .and_then(|m| m.remove(&add.service_handle))
                 {
-                    if s.send(esp!(add.status).map(|_| add.attr_handle)).await.is_err() {
+                    if s.send(esp!(add.status).map(|_| add.attr_handle))
+                        .await
+                        .is_err()
+                    {
                         error!("Error sending event: {:?}", event);
                     };
                 } else {
@@ -187,10 +186,12 @@ unsafe extern "C" fn gatts_event_handler(
                 if let Some(s) = GATTS_ADD_CDESC
                     .lock()
                     .as_mut()
-                    .map(|m| m.remove(&add.service_handle))
-                    .flatten()
+                    .and_then(|m| m.remove(&add.service_handle))
                 {
-                    if s.send(esp!(add.status).map(|_| add.attr_handle)).await.is_err() {
+                    if s.send(esp!(add.status).map(|_| add.attr_handle))
+                        .await
+                        .is_err()
+                    {
                         error!("Error sending event: {:?}", event);
                     };
                 } else {
@@ -201,12 +202,13 @@ unsafe extern "C" fn gatts_event_handler(
                 }
             }
             GattServiceEvent::Connect(conn) => {
-                let mut conn_params: esp_ble_conn_update_params_t = Default::default();
-                conn_params.bda = conn.remote_bda;
-                conn_params.latency = 0;
-                conn_params.max_int = 0x20; // max_int = 0x20*1.25ms = 40ms
-                conn_params.min_int = 0x10; // min_int = 0x10*1.25ms = 20ms
-                conn_params.timeout = 400; // timeout = 400*10ms = 4000ms
+                let mut conn_params: esp_ble_conn_update_params_t = esp_ble_conn_update_params_t {
+                    bda: conn.remote_bda,
+                    min_int: 0x10, // min_int = 0x10*1.25ms = 20ms
+                    max_int: 0x20, // max_int = 0x20*1.25ms = 40ms
+                    latency: 0,
+                    timeout: 400,  // timeout = 400*10ms = 4000ms
+                };
                                            //
                 info!("Connection from: {:?}", conn);
 
@@ -353,7 +355,9 @@ impl EspBle {
 
         info!("configure_advertising_data_raw exit");
 
-        r.recv().await.unwrap_or(esp!(ESP_ERR_INVALID_STATE))
+        r.recv()
+            .await
+            .unwrap_or_else(|_| esp!(ESP_ERR_INVALID_STATE))
     }
 
     pub async fn configure_advertising_data(
@@ -368,7 +372,7 @@ impl EspBle {
         let service_data_len = data.service.as_ref().map(|s| s.len()).unwrap_or(0) as u16;
         #[repr(C, align(4))]
         struct aligned_uuid {
-            uuid: [u8; 16]
+            uuid: [u8; 16],
         }
         let mut svc_uuid: aligned_uuid = aligned_uuid { uuid: [0; 16] };
 
@@ -434,7 +438,9 @@ impl EspBle {
 
         info!("configure_advertising exit");
 
-        r.recv().await.unwrap_or(esp!(ESP_ERR_INVALID_STATE))
+        r.recv()
+            .await
+            .unwrap_or_else(|_| esp!(ESP_ERR_INVALID_STATE))
     }
 
     pub async fn start_advertise(&self) -> Result<(), EspError> {
@@ -457,7 +463,9 @@ impl EspBle {
         esp!(unsafe { esp_ble_gap_start_advertising(&mut adv_param) })?;
 
         info!("start_advertise exit");
-        r.recv().await.unwrap_or(esp!(ESP_ERR_INVALID_STATE))
+        r.recv()
+            .await
+            .unwrap_or_else(|_| esp!(ESP_ERR_INVALID_STATE))
     }
 
     pub async fn register_gatt_service_application(
@@ -530,7 +538,9 @@ impl EspBle {
 
         esp!(unsafe { esp_ble_gatts_start_service(svc_handle) })?;
 
-        r.recv().await.unwrap_or(esp!(ESP_ERR_INVALID_STATE))
+        r.recv()
+            .await
+            .unwrap_or_else(|_| esp!(ESP_ERR_INVALID_STATE))
     }
 
     pub fn read_attribute_value(&self, attr_handle: u16) -> Result<Vec<u8>, EspError> {
@@ -538,7 +548,11 @@ impl EspBle {
         let mut data: *const u8 = std::ptr::null_mut();
 
         unsafe {
-            esp!(esp_ble_gatts_get_attr_value(attr_handle, &mut len, &mut data))?;
+            esp!(esp_ble_gatts_get_attr_value(
+                attr_handle,
+                &mut len,
+                &mut data
+            ))?;
 
             let data = std::slice::from_raw_parts(data, len as usize);
             info!("len: {:?}, data: {:p}", len, data);

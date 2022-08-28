@@ -113,37 +113,37 @@ impl From<&AdvertiseType> for Vec<u8> {
             AdvertiseType::ServicePartial16(svc) => {
                 let l = svc.len() * 2 + 1;
                 let mut v = vec![l as u8, 0x02];
-                v.append(&mut svc.into_iter().flat_map(|svc| svc.to_be_bytes()).collect());
+                v.append(&mut svc.iter().flat_map(|svc| svc.to_be_bytes()).collect());
                 v
             }
             AdvertiseType::ServiceComplete16(svc) => {
                 let l = svc.len() * 2 + 1;
                 let mut v = vec![l as u8, 0x03];
-                v.append(&mut svc.into_iter().flat_map(|svc| svc.to_be_bytes()).collect());
+                v.append(&mut svc.iter().flat_map(|svc| svc.to_be_bytes()).collect());
                 v
             }
             AdvertiseType::ServicePartial32(svc) => {
                 let l = svc.len() * 4 + 1;
                 let mut v = vec![l as u8, 0x04];
-                v.append(&mut svc.into_iter().flat_map(|svc| svc.to_be_bytes()).collect());
+                v.append(&mut svc.iter().flat_map(|svc| svc.to_be_bytes()).collect());
                 v
             }
             AdvertiseType::ServiceComplete32(svc) => {
                 let l = svc.len() * 4 + 1;
                 let mut v = vec![l as u8, 0x05];
-                v.append(&mut svc.into_iter().flat_map(|svc| svc.to_be_bytes()).collect());
+                v.append(&mut svc.iter().flat_map(|svc| svc.to_be_bytes()).collect());
                 v
             }
             AdvertiseType::ServicePartial128(svc) => {
                 let l = svc.len() * 16 + 1;
                 let mut v = vec![l as u8, 0x06];
-                v.append(&mut svc.into_iter().flat_map(|svc| svc.clone()).collect());
+                v.append(&mut svc.iter().flat_map(|svc| *svc).collect());
                 v
             }
             AdvertiseType::ServiceComplete128(svc) => {
                 let l = svc.len() * 16 + 1;
                 let mut v = vec![l as u8, 0x07];
-                v.append(&mut svc.into_iter().flat_map(|svc| svc.clone()).collect());
+                v.append(&mut svc.iter().flat_map(|svc| *svc).collect());
                 v
             }
             AdvertiseType::IntervalRange(min, max) => {
