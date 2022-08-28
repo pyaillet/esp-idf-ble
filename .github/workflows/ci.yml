@@ -10,11 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: Nightly
-        uses: actions-rs/toolchain@v1
+      - name: Install Rust for Xtensa
+        uses: esp-rs/xtensa-toolchain@v1.1
         with:
-          toolchain: nightly
-          components: rust-src
+          default: true
+          ldproxy: true
       - name: Release build std
         uses: actions-rs/cargo@v1
         with:
@@ -31,6 +31,11 @@ jobs:
         with:
           toolchain: nightly
           components: rust-src, clippy
+      - name: Install Rust for Xtensa
+        uses: esp-rs/xtensa-toolchain@v1.1
+        with:
+          default: true
+          ldproxy: true
       - name: Annotate commit with clippy warnings std
         uses: actions-rs/clippy-check@v1
         with:
