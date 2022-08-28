@@ -20,4 +20,4 @@ Then you can launch the following command to compile one of the example, flash i
 
 ## examples
 
-- [] gatt_server
+- [ ] gatt_server
