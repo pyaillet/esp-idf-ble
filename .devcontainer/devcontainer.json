@@ -1,0 +1,50 @@
+{
+    "name": "ttgo-display-idf-rs",
+    // Select between image and build propieties to pull or build the image.
+    //"image": "docker.io/espressif/idf-rust:esp32_v4.4_1.61.0.0",
+    "build": {
+      "dockerfile": "Dockerfile",
+      "args": {
+        "CONTAINER_USER": "esp",
+        "CONTAINER_GROUP": "esp",
+        "ESP_IDF_VERSION": "release/v4.4",
+        "ESP_BOARD": "esp32"
+      }
+    },
+    "settings": {
+      "editor.fontFamily": "FiraCode Nerd Font Mono",
+      "editor.fontSize": 16,
+      "editor.formatOnPaste": true,
+      "editor.formatOnSave": true,
+      "editor.formatOnSaveMode": "modifications",
+      "editor.formatOnType": true,
+      "lldb.executable": "/usr/bin/lldb",
+      "files.watcherExclude": {
+        "**/target/**": true
+      },
+      "rust-analyzer.checkOnSave.command": "clippy",
+      "rust-analyzer.checkOnSave.allTargets": false,
+      "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer"
+      },
+      "terminal.integrated.fontSize": 16,
+      "terminal.integrated.fontFamily": "FiraCode Nerd Font Mono"
+    },
+    "extensions": [
+      "rust-lang.rust-analyzer",
+      "tamasfe.even-better-toml",
+      "serayuzgur.crates",
+      "mutantdino.resourcemonitor",
+      "yzhang.markdown-all-in-one",
+      "webfreak.debug",
+      "actboy168.tasks",
+      "ms-azuretools.vscode-docker"
+    ],
+    "forwardPorts": [
+      9012,
+      9333,
+      8000
+    ],
+    "workspaceMount": "source=${localWorkspaceFolder},target=/home/esp/{{ crate_name }},type=bind,consistency=cached",
+    "workspaceFolder": "/home/esp/{{ crate_name }}"
+  }
