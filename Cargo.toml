@@ -1,6 +1,6 @@
 [package]
-name = "esp-ble"
-version = "0.1.0"
+name = "esp-idf-ble"
+version = "0.0.1"
 edition = "2021"
 authors = ["Pierre-Yves Aillet <pyaillet@gmail.com>"]
 resolver = "2"
