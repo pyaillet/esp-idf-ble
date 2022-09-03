@@ -3,12 +3,12 @@
 
 # esp-idf-ble
 
-This project use as a workbench to enable BLE on the ESP32 microcontrollers family
+This project aims at providing a safe Rust wrapper of `esp-idf` to enable BLE on the ESP32 microcontrollers family
 
 ## What's working ?
 
-As of now, `esp-ble-example` is a rust port of [this esp-idf gatt_server example](https://github.com/espressif/esp-idf/tree/master/examples/bluetooth/bluedroid/ble/gatt_server).
 It's using a custom Rust wrapper around the [esp-idf bluedroid BLE API](https://docs.espressif.com/projects/esp-idf/en/v4.4.2/esp32/api-reference/bluetooth/bt_le.html)
+As of now, only the `gatt_server` example is partially implemented. IT is a rust port of [this esp-idf gatt_server example](https://github.com/espressif/esp-idf/tree/master/examples/bluetooth/bluedroid/ble/gatt_server).
 
 The goal is to complete the wrapper library and maybe make it usable elsewhere.
 
