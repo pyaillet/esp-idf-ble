@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use esp_ble::advertise::AdvertiseData;
-use esp_ble::{
+use esp_idf_ble::advertise::AdvertiseData;
+use esp_idf_ble::{
     AttributeValue, AutoResponse, BtUuid, EspBle, GattApplication, GattCharacteristic,
     GattCharacteristicDesc, GattService,
 };
