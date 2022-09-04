@@ -2,16 +2,6 @@ use esp_idf_sys::*;
 
 use crate::BtUuid;
 
-enum GattApplicationStatus {
-    Unregistered,
-    Registered(esp_gatt_if_t),
-}
-
-pub struct GattApplication {
-    id: u16,
-    status: GattApplicationStatus,
-}
-
 #[derive(Debug)]
 pub struct GattService {
     pub(crate) is_primary: bool,
@@ -36,32 +26,6 @@ impl GattService {
             id,
             handle,
             instance_id,
-        }
-    }
-}
-
-impl GattApplication {
-    pub fn new(id: u16) -> Self {
-        Self {
-            id,
-            status: GattApplicationStatus::Unregistered,
-        }
-    }
-
-    pub fn get_id(&self) -> u16 {
-        self.id
-    }
-
-    pub(crate) fn register(&mut self, gatt_if: esp_gatt_if_t) {
-        self.status = GattApplicationStatus::Registered(gatt_if);
-    }
-
-    pub fn get_gatt_if(&self) -> Result<esp_gatt_if_t, EspError> {
-        match self.status {
-            GattApplicationStatus::Unregistered => {
-                Err(EspError::from(ESP_ERR_INVALID_STATE).unwrap())
-            }
-            GattApplicationStatus::Registered(gatt_if) => Ok(gatt_if),
         }
     }
 }

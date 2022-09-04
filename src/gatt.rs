@@ -174,12 +174,12 @@ impl<const S: usize> GattCharacteristic<S> {
     }
 }
 
-pub struct GattCharacteristicDesc {
+pub struct GattDescriptor {
     pub(crate) uuid: BtUuid,
     pub(crate) permissions: esp_gatt_perm_t,
 }
 
-impl GattCharacteristicDesc {
+impl GattDescriptor {
     pub fn new(uuid: BtUuid, permissions: esp_gatt_perm_t) -> Self {
         Self { uuid, permissions }
     }

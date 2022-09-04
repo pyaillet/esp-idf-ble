@@ -1,14 +1,14 @@
 use std::sync::Arc;
+use std::sync::mpsc::sync_channel;
 use std::thread;
 use std::time::Duration;
 
 use esp_idf_ble::advertise::AdvertiseData;
 use esp_idf_ble::{
-    AttributeValue, AutoResponse, BtUuid, EspBle, GattApplication, GattCharacteristic,
-    GattCharacteristicDesc, GattService,
+    AttributeValue, AutoResponse, BtUuid, EspBle, GattCharacteristic, GattDescriptor, GattService,
+    GattServiceEvent,
 };
 use esp_idf_hal::delay;
-use esp_idf_hal::mutex::Mutex;
 // use esp_idf_hal::prelude::*;
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
@@ -16,15 +16,19 @@ use esp_idf_svc::sysloop::EspSysLoopStack;
 use esp_idf_sys::*;
 
 use embedded_hal::blocking::delay::DelayUs;
-// use embedded_hal::digital::v2::OutputPin;
-
-use anyhow::Result;
 
 use log::*;
-use smol::future::block_on;
 
 fn main() {
-    init_esp().expect("Error initializing ESP");
+    esp_idf_sys::link_patches();
+
+    // Bind the log crate to the ESP Logging facilities
+    esp_idf_svc::log::EspLogger::initialize_default();
+
+    #[allow(unused)]
+    let netif_stack = Arc::new(EspNetifStack::new().expect("Unable to init Netif Stack"));
+    #[allow(unused)]
+    let sys_loop_stack = Arc::new(EspSysLoopStack::new().expect("Unable to init sys_loop"));
 
     #[allow(unused)]
     let default_nvs = Arc::new(EspDefaultNvs::new().unwrap());
@@ -34,114 +38,151 @@ fn main() {
     delay.delay_us(100_u32);
 
     let mut ble = EspBle::new("ESP32".into(), default_nvs).unwrap();
-    let application = Arc::new(Mutex::new(GattApplication::new(1)));
-    block_on(async {
-        let _ = ble
-            .register_gatt_service_application(application.clone())
-            .await;
-        info!("application registered");
 
-        let svc_uuid = BtUuid::Uuid16(0x00FF);
+    let (s, r) = sync_channel(1);
 
-        let svc = GattService::new_primary(svc_uuid.clone(), 4, 1);
+    ble.register_gatt_service_application(
+        1,
+        Box::new(move |gatts_if, reg| {
+            if let GattServiceEvent::Register(reg) = reg {
+                info!("Service registered with {:?}", reg);
+                s.send(gatts_if).expect("Unable to send result");
+            } else {
+                warn!("What are you doing here??");
+            }
+        }),
+    )
+    .expect("Unable to register service");
 
-        info!("GattService to be created: {:?}", svc);
+    let svc_uuid = BtUuid::Uuid16(0x00FF);
 
-        let svc_handle = ble
-            .create_service(application, svc)
-            .await
-            .expect("Unable to create service");
+    let svc = GattService::new_primary(svc_uuid, 4, 1);
 
-        info!("SVC Handle: {:?}", svc_handle);
+    info!("GattService to be created: {:?}", svc);
 
-        ble.start_service(svc_handle)
-            .await
-            .expect("Unable to start ble service");
+    let gatts_if = r.recv().expect("Unable to receive value");
 
-        let attr_value: AttributeValue<12> =
-            AttributeValue::new_with_value(&[0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0x57, 0x6F, 0x72, 0x6C, 0x64]);
-        let charac = GattCharacteristic::new(
-            BtUuid::Uuid16(0xff01),
-            ESP_GATT_PERM_READ as _,
-            ESP_GATT_CHAR_PROP_BIT_READ as _,
-            attr_value,
-            AutoResponse::ByGatt,
-        );
-        let char_attr_handle = ble
-            .add_characteristic(svc_handle, charac)
-            .await
-            .expect("Unable to add characteristic");
+    let (s, r) = sync_channel(1);
 
-        info!("Characteristic Attribute handle: {}", char_attr_handle);
+    ble.create_service(
+        gatts_if,
+        svc,
+        Box::new(move |gatts_if, create| {
+            if let GattServiceEvent::Create(create) = create {
+                info!(
+                    "Service created with {{ \tgatts_if: {}\tstatus: {}\n\thandle: {}\n}}",
+                    gatts_if, create.status, create.service_handle
+                );
+                s.send(create.service_handle).expect("Unable to send value");
+            }
+        }),
+    )
+    .expect("Unable to create service");
 
-        let data = ble
-            .read_attribute_value(char_attr_handle)
-            .expect("Unable to read characteristic value");
-        info!("Characteristic values: {:?}", data);
+    let svc_handle = r.recv().expect("Unable to receive value");
 
-        let cdesc = GattCharacteristicDesc::new(BtUuid::Uuid16(ESP_GATT_UUID_CHAR_CLIENT_CONFIG as u16), ESP_GATT_PERM_READ as _);
-        let desc_attr_handle = ble
-            .add_characteristic_desc(svc_handle, cdesc)
-            .await
-            .expect("Unable to add characteristic");
+    ble.start_service(
+        svc_handle,
+        Box::new(|_, start| {
+            if let GattServiceEvent::StartComplete(start) = start {
+                info!("Service started for handle: {}", start.service_handle);
+            }
+        }),
+    )
+    .expect("Unable to start ble service");
 
-        info!("Descriptor Attribute handle: {}", desc_attr_handle);
+    let attr_value: AttributeValue<12> = AttributeValue::new_with_value(&[
+        0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0x57, 0x6F, 0x72, 0x6C, 0x64,
+    ]);
+    let charac = GattCharacteristic::new(
+        BtUuid::Uuid16(0xff01),
+        ESP_GATT_PERM_READ as _,
+        ESP_GATT_CHAR_PROP_BIT_READ as _,
+        attr_value,
+        AutoResponse::ByGatt,
+    );
 
-        let adv_data = AdvertiseData {
-            include_name: true,
-            include_txpower: false,
-            min_interval: 6,
-            max_interval: 16,
-            service_uuid: Some(BtUuid::Uuid128([
-                0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0x00,
-                0x00, 0x00,
-            ])),
-            flag: (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT) as _,
-            ..Default::default()
-        };
-        ble.configure_advertising_data(adv_data)
-            .await
-            .expect("Failed to configure advertising data");
+    let (s, r) = sync_channel(1);
 
-        info!("advertising configured");
+    ble.add_characteristic(
+        svc_handle,
+        charac,
+        Box::new(move |_, add_char| {
+            if let GattServiceEvent::AddCharacteristicComplete(add_char) = add_char {
+                info!("Attr added with handle: {}", add_char.attr_handle);
+                s.send(add_char.attr_handle).expect("Unable to send value");
+            }
+        }),
+    )
+    .expect("Unable to add characteristic");
 
-        let scan_rsp_data = AdvertiseData {
-            include_name: false,
-            include_txpower: true,
-            set_scan_rsp: true,
-            service_uuid: Some(BtUuid::Uuid128([
-                0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0x00,
-                0x00, 0x00,
-            ])),
-            ..Default::default()
-        };
+    let char_attr_handle = r.recv().expect("Unable to recv attr_handle");
 
-        ble.configure_advertising_data(scan_rsp_data)
-            .await
-            .expect("Failed to configure advertising data");
+    let data = ble
+        .read_attribute_value(char_attr_handle)
+        .expect("Unable to read characteristic value");
+    info!("Characteristic values: {:?}", data);
 
-        ble.start_advertise()
-            .await
-            .expect("Failed to start advertising");
+    let cdesc = GattDescriptor::new(
+        BtUuid::Uuid16(ESP_GATT_UUID_CHAR_CLIENT_CONFIG as u16),
+        ESP_GATT_PERM_READ as _,
+    );
+    ble.add_descriptor(
+        svc_handle,
+        cdesc,
+        Box::new(|_, add_desc| {
+            if let GattServiceEvent::AddDescriptorComplete(add_desc) = add_desc {
+                info!("Descriptor added with handle: {}", add_desc.attr_handle);
+            }
+        }),
+    )
+    .expect("Unable to add characteristic");
 
+    let adv_data = AdvertiseData {
+        include_name: true,
+        include_txpower: false,
+        min_interval: 6,
+        max_interval: 16,
+        service_uuid: Some(BtUuid::Uuid128([
+            0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0x00,
+            0x00, 0x00,
+        ])),
+        flag: (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT) as _,
+        ..Default::default()
+    };
+    ble.configure_advertising_data(
+        adv_data,
+        Box::new(|_| {
+            info!("advertising configured");
+        }),
+    )
+    .expect("Failed to configure advertising data");
+
+    let scan_rsp_data = AdvertiseData {
+        include_name: false,
+        include_txpower: true,
+        set_scan_rsp: true,
+        service_uuid: Some(BtUuid::Uuid128([
+            0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0x00,
+            0x00, 0x00,
+        ])),
+        ..Default::default()
+    };
+
+    ble.configure_advertising_data(
+        scan_rsp_data,
+        Box::new(|_| {
+            info!("Advertising configured");
+        }),
+    )
+    .expect("Failed to configure advertising data");
+
+    ble.start_advertise(Box::new(|_| {
         info!("advertising started");
-    });
+    }))
+    .expect("Failed to start advertising");
 
     loop {
         thread::sleep(Duration::from_secs(5));
     }
-}
-
-fn init_esp() -> Result<()> {
-    esp_idf_sys::link_patches();
-
-    // Bind the log crate to the ESP Logging facilities
-    esp_idf_svc::log::EspLogger::initialize_default();
-
-    #[allow(unused)]
-    let netif_stack = Arc::new(EspNetifStack::new()?);
-    #[allow(unused)]
-    let sys_loop_stack = Arc::new(EspSysLoopStack::new()?);
-
-    Ok(())
 }
