@@ -41,14 +41,21 @@ enum GattCallbacks {
     Start(u16),                 // svc_handle
     AddCharacteristic(u16),     // svc_handle
     AddCharacteristicDesc(u16), // svc_handle
+    Read(u16),                  // attr_handle
+    Write(u16),                 // attr_handle
 }
 
 #[allow(clippy::type_complexity)]
 static GAP_CALLBACKS: Singleton<HashMap<GapCallbacks, Box<dyn Fn(GapEvent) + Send>>> =
     Mutex::new(Option::None);
 #[allow(clippy::type_complexity)]
-static GATT_CALLBACKS: Singleton<HashMap<GattCallbacks, Box<dyn Fn(u8, GattServiceEvent) + Send>>> =
-    Mutex::new(Option::None);
+static GATT_CALLBACKS_ONE_TIME: Singleton<
+    HashMap<GattCallbacks, Box<dyn Fn(u8, GattServiceEvent) + Send>>,
+> = Mutex::new(Option::None);
+#[allow(clippy::type_complexity)]
+static GATT_CALLBACKS_KEPT: Singleton<
+    HashMap<GattCallbacks, Box<dyn Fn(u8, GattServiceEvent) + Send>>,
+> = Mutex::new(Option::None);
 
 unsafe extern "C" fn gap_event_handler(
     event: esp_gap_ble_cb_event_t,
@@ -87,7 +94,7 @@ unsafe extern "C" fn gatts_event_handler(
 
     match &event {
         GattServiceEvent::Register(reg) => {
-            if let Some(cb) = GATT_CALLBACKS
+            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
                 .lock()
                 .as_mut()
                 .and_then(|m| m.remove(&GattCallbacks::Register(reg.app_id)))
@@ -101,7 +108,7 @@ unsafe extern "C" fn gatts_event_handler(
             }
         }
         GattServiceEvent::Create(_) => {
-            if let Some(cb) = GATT_CALLBACKS
+            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
                 .lock()
                 .as_mut()
                 .and_then(|m| m.remove(&GattCallbacks::Create(gatts_if)))
@@ -115,7 +122,7 @@ unsafe extern "C" fn gatts_event_handler(
             }
         }
         GattServiceEvent::StartComplete(start) => {
-            if let Some(cb) = GATT_CALLBACKS
+            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
                 .lock()
                 .as_mut()
                 .and_then(|m| m.remove(&GattCallbacks::Start(start.service_handle)))
@@ -129,7 +136,7 @@ unsafe extern "C" fn gatts_event_handler(
             }
         }
         GattServiceEvent::AddCharacteristicComplete(add_char) => {
-            if let Some(cb) = GATT_CALLBACKS
+            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
                 .lock()
                 .as_mut()
                 .and_then(|m| m.remove(&GattCallbacks::AddCharacteristic(add_char.service_handle)))
@@ -143,7 +150,7 @@ unsafe extern "C" fn gatts_event_handler(
             }
         }
         GattServiceEvent::AddDescriptorComplete(add_desc) => {
-            if let Some(cb) = GATT_CALLBACKS.lock().as_mut().and_then(|m| {
+            if let Some(cb) = GATT_CALLBACKS_ONE_TIME.lock().as_mut().and_then(|m| {
                 m.remove(&GattCallbacks::AddCharacteristicDesc(
                     add_desc.service_handle,
                 ))
@@ -169,6 +176,34 @@ unsafe extern "C" fn gatts_event_handler(
 
             let _ = esp!(esp_ble_gap_update_conn_params(&mut conn_params));
         }
+        GattServiceEvent::Read(read) => {
+            if let Some(cb) = GATT_CALLBACKS_KEPT
+                .lock()
+                .as_mut()
+                .and_then(|m| m.get(&GattCallbacks::Read(read.handle)))
+            {
+                cb(gatts_if, event);
+            } else {
+                warn!(
+                    "No callback registered for Read with handle: {}",
+                    read.handle
+                );
+            }
+        }
+        GattServiceEvent::Write(write) => {
+            if let Some(cb) = GATT_CALLBACKS_KEPT
+                .lock()
+                .as_mut()
+                .and_then(|m| m.get(&GattCallbacks::Write(write.handle)))
+            {
+                cb(gatts_if, event);
+            } else {
+                warn!(
+                    "No callback registered for Write with handle: {}",
+                    write.handle
+                );
+            }
+        }
         _ => warn!("Handler for {:?} not implemented", event),
     }
 }
@@ -190,7 +225,8 @@ impl EspBle {
         let ble = Self::init(device_name, nvs)?;
 
         *GAP_CALLBACKS.lock() = Some(HashMap::new());
-        *GATT_CALLBACKS.lock() = Some(HashMap::new());
+        *GATT_CALLBACKS_ONE_TIME.lock() = Some(HashMap::new());
+        *GATT_CALLBACKS_KEPT.lock() = Some(HashMap::new());
 
         *taken = true;
         Ok(ble)
@@ -282,7 +318,7 @@ impl EspBle {
     pub fn configure_advertising_data_raw(
         &self,
         data: RawAdvertiseData,
-        cb: Box<dyn Fn(GapEvent) + Send>,
+        cb: impl Fn(GapEvent) + 'static + Send,
     ) -> Result<(), EspError> {
         info!("configure_advertising_data_raw enter");
 
@@ -293,10 +329,10 @@ impl EspBle {
             .as_mut()
             .map_or(esp!(ESP_ERR_INVALID_STATE), |m| {
                 if data.set_scan_rsp {
-                    m.insert(GapCallbacks::RawScanResponseDataset, cb);
+                    m.insert(GapCallbacks::RawScanResponseDataset, Box::new(cb));
                     esp!(unsafe { esp_ble_gap_config_scan_rsp_data_raw(raw_data, raw_len) })
                 } else {
-                    m.insert(GapCallbacks::AdvertisingDataset, cb);
+                    m.insert(GapCallbacks::AdvertisingDataset, Box::new(cb));
                     esp!(unsafe { esp_ble_gap_config_adv_data_raw(raw_data, raw_len) })
                 }
             })
@@ -305,7 +341,7 @@ impl EspBle {
     pub fn configure_advertising_data(
         &self,
         data: advertise::AdvertiseData,
-        cb: Box<dyn Fn(GapEvent) + Send>,
+        cb: impl Fn(GapEvent) + 'static + Send,
     ) -> Result<(), EspError> {
         info!("configure_advertising enter");
 
@@ -371,9 +407,9 @@ impl EspBle {
 
         if let Some(m) = GAP_CALLBACKS.lock().as_mut() {
             if is_scan_rsp {
-                m.insert(GapCallbacks::ScanResponseDataset, cb);
+                m.insert(GapCallbacks::ScanResponseDataset, Box::new(cb));
             } else {
-                m.insert(GapCallbacks::AdvertisingDataset, cb);
+                m.insert(GapCallbacks::AdvertisingDataset, Box::new(cb));
             }
         };
 
@@ -382,7 +418,7 @@ impl EspBle {
         esp!(unsafe { esp_ble_gap_config_adv_data(&mut adv_data) })
     }
 
-    pub fn start_advertise(&self, cb: Box<dyn Fn(GapEvent) + Send>) -> Result<(), EspError> {
+    pub fn start_advertise(&self, cb: impl Fn(GapEvent) + 'static + Send) -> Result<(), EspError> {
         info!("start_advertise enter");
 
         let mut adv_param: esp_ble_adv_params_t = esp_ble_adv_params_t {
@@ -400,7 +436,7 @@ impl EspBle {
             .lock()
             .as_mut()
             .map_or(esp!(ESP_ERR_INVALID_STATE), |m| {
-                m.insert(GapCallbacks::AdvertisingStart, cb);
+                m.insert(GapCallbacks::AdvertisingStart, Box::new(cb));
                 esp!(unsafe { esp_ble_gap_start_advertising(&mut adv_param) })
             })
     }
@@ -408,14 +444,14 @@ impl EspBle {
     pub fn register_gatt_service_application(
         &mut self,
         app_id: u16,
-        cb: Box<dyn Fn(u8, GattServiceEvent) + Send>,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
     ) -> Result<(), EspError> {
         info!(
             "register_gatt_service_application enter for app_id: {}",
             app_id
         );
-        if let Some(m) = GATT_CALLBACKS.lock().as_mut() {
-            m.insert(GattCallbacks::Register(app_id), cb);
+        if let Some(m) = GATT_CALLBACKS_ONE_TIME.lock().as_mut() {
+            m.insert(GattCallbacks::Register(app_id), Box::new(cb));
         } else {
             panic!("Unable to add callback");
         }
@@ -427,7 +463,7 @@ impl EspBle {
         &self,
         gatt_if: u8,
         svc: GattService,
-        cb: Box<dyn Fn(u8, GattServiceEvent) + Send>,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
     ) -> Result<(), EspError> {
         let svc_uuid: esp_bt_uuid_t = svc.id.into();
 
@@ -439,10 +475,10 @@ impl EspBle {
             },
         };
 
-        GATT_CALLBACKS
+        GATT_CALLBACKS_ONE_TIME
             .lock()
             .as_mut()
-            .and_then(|m| m.insert(GattCallbacks::Create(gatt_if), cb));
+            .and_then(|m| m.insert(GattCallbacks::Create(gatt_if), Box::new(cb)));
 
         esp!(unsafe { esp_ble_gatts_create_service(gatt_if, &mut svc_id, svc.handle) })
     }
@@ -450,12 +486,12 @@ impl EspBle {
     pub fn start_service(
         &self,
         svc_handle: u16,
-        cb: Box<dyn Fn(u8, GattServiceEvent) + Send>,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
     ) -> Result<(), EspError> {
-        GATT_CALLBACKS
+        GATT_CALLBACKS_ONE_TIME
             .lock()
             .as_mut()
-            .and_then(|m| m.insert(GattCallbacks::Start(svc_handle), cb));
+            .and_then(|m| m.insert(GattCallbacks::Start(svc_handle), Box::new(cb)));
 
         esp!(unsafe { esp_ble_gatts_start_service(svc_handle) })
     }
@@ -481,12 +517,12 @@ impl EspBle {
         &self,
         svc_handle: u16,
         charac: GattCharacteristic<S>,
-        cb: Box<dyn Fn(u8, GattServiceEvent) + Send>,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
     ) -> Result<(), EspError> {
-        GATT_CALLBACKS
+        GATT_CALLBACKS_ONE_TIME
             .lock()
             .as_mut()
-            .and_then(|m| m.insert(GattCallbacks::AddCharacteristic(svc_handle), cb));
+            .and_then(|m| m.insert(GattCallbacks::AddCharacteristic(svc_handle), Box::new(cb)));
 
         let mut uuid = charac.uuid.into();
 
@@ -509,12 +545,14 @@ impl EspBle {
         &self,
         svc_handle: u16,
         char_desc: GattDescriptor,
-        cb: Box<dyn Fn(u8, GattServiceEvent) + Send>,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
     ) -> Result<(), EspError> {
-        GATT_CALLBACKS
-            .lock()
-            .as_mut()
-            .and_then(|m| m.insert(GattCallbacks::AddCharacteristicDesc(svc_handle), cb));
+        GATT_CALLBACKS_ONE_TIME.lock().as_mut().and_then(|m| {
+            m.insert(
+                GattCallbacks::AddCharacteristicDesc(svc_handle),
+                Box::new(cb),
+            )
+        });
 
         let mut uuid = char_desc.uuid.into();
 
@@ -528,4 +566,46 @@ impl EspBle {
             )
         })
     }
+
+    pub fn register_read_handler(
+        &self,
+        attr_handle: u16,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
+    ) {
+        GATT_CALLBACKS_KEPT
+            .lock()
+            .as_mut()
+            .and_then(|m| m.insert(GattCallbacks::Read(attr_handle), Box::new(cb)));
+    }
+    pub fn register_write_handler(
+        &self,
+        attr_handle: u16,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
+    ) {
+        GATT_CALLBACKS_KEPT
+            .lock()
+            .as_mut()
+            .and_then(|m| m.insert(GattCallbacks::Write(attr_handle), Box::new(cb)));
+    }
+}
+
+pub fn send(
+    gatts_if: u8,
+    handle: u16,
+    conn_id: u16,
+    trans_id: u32,
+    status: u32,
+    data: &[u8],
+) -> Result<(), EspError> {
+    let mut rsp: esp_gatt_rsp_t = esp_gatt_rsp_t::default();
+
+    esp!(unsafe {
+        rsp.handle = handle;
+        rsp.attr_value.len = data.len() as u16;
+        if data.len() > 0 {
+            rsp.attr_value.value[..data.len()].copy_from_slice(data);
+        }
+
+        esp_ble_gatts_send_response(gatts_if, conn_id, trans_id, status, &mut rsp)
+    })
 }
