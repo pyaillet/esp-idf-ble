@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -79,7 +79,7 @@ fn main() {
             info!("Service started for handle: {}", start.service_handle);
         }
     })
-   .expect("Unable to start ble service");
+    .expect("Unable to start ble service");
 
     let attr_value: AttributeValue<12> = AttributeValue::new_with_value(&[
         0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0x57, 0x6F, 0x72, 0x6C, 0x64,
@@ -90,7 +90,7 @@ fn main() {
         (ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE) as _,
         attr_value,
         AutoResponse::ByApp,
-   );
+    );
 
     let (s, r) = sync_channel(1);
 
@@ -100,7 +100,7 @@ fn main() {
             s.send(add_char.attr_handle).expect("Unable to send value");
         }
     })
-   .expect("Unable to add characteristic");
+    .expect("Unable to add characteristic");
 
     let char_attr_handle = r.recv().expect("Unable to recv attr_handle");
 
