@@ -32,6 +32,10 @@ enum GapCallbacks {
     ScanResponseDataset,
     AdvertisingStart,
     UpdateConnectionParams,
+    PasskeyNotify,
+    KeyEvent,
+    AuthComplete,
+    NumericComparisonRequest,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
@@ -43,6 +47,7 @@ enum GattCallbacks {
     AddCharacteristicDesc(u16), // svc_handle
     Read(u16),                  // attr_handle
     Write(u16),                 // attr_handle
+    Connect(u8),                // gatts_if
 }
 
 #[allow(clippy::type_complexity)]
@@ -72,6 +77,10 @@ unsafe extern "C" fn gap_event_handler(
             GapEvent::ScanResponseDatasetComplete(_) => &GapCallbacks::ScanResponseDataset,
             GapEvent::AdvertisingStartComplete(_) => &GapCallbacks::AdvertisingStart,
             GapEvent::UpdateConnectionParamsComplete(_) => &GapCallbacks::UpdateConnectionParams,
+            GapEvent::PasskeyNotification(_) => &GapCallbacks::PasskeyNotify,
+            GapEvent::Key(_) => &GapCallbacks::KeyEvent,
+            GapEvent::AuthenticationComplete(_) => &GapCallbacks::AuthComplete,
+            GapEvent::NumericComparisonRequest => &GapCallbacks::NumericComparisonRequest,
             _ => unimplemented!("{:?}", event),
         })
     }) {
@@ -175,6 +184,13 @@ unsafe extern "C" fn gatts_event_handler(
             info!("Connection from: {:?}", conn);
 
             let _ = esp!(esp_ble_gap_update_conn_params(&mut conn_params));
+            if let Some(cb) = GATT_CALLBACKS_KEPT
+                .lock()
+                .as_mut()
+                .and_then(|m| m.get(&GattCallbacks::Connect(gatts_if)))
+            {
+                cb(gatts_if, event);
+            }
         }
         GattServiceEvent::Read(read) => {
             if let Some(cb) = GATT_CALLBACKS_KEPT
@@ -612,6 +628,7 @@ impl EspBle {
             .as_mut()
             .and_then(|m| m.insert(GattCallbacks::Read(attr_handle), Box::new(cb)));
     }
+
     pub fn register_write_handler(
         &self,
         attr_handle: u16,
@@ -621,6 +638,59 @@ impl EspBle {
             .lock()
             .as_mut()
             .and_then(|m| m.insert(GattCallbacks::Write(attr_handle), Box::new(cb)));
+    }
+
+    pub fn configure_security(&self, gatts_if: u8, sec: u32) -> Result<(), EspError> {
+        GATT_CALLBACKS_KEPT.lock().as_mut().and_then(move |m| {
+            m.insert(
+                GattCallbacks::Connect(gatts_if),
+                Box::new(move |_gatts_if, connect| {
+                    if let GattServiceEvent::Connect(mut connect) = connect {
+                        esp!(unsafe {
+                            esp_ble_set_encryption(connect.remote_bda.as_mut_ptr(), sec)
+                        })
+                        .expect("Unable to set security level");
+                    }
+                }),
+            )
+        });
+        GAP_CALLBACKS.lock().as_mut().and_then(move |m| {
+            m.insert(
+                GapCallbacks::PasskeyNotify,
+                Box::new(|notify| {
+                    if let GapEvent::PasskeyNotification(notify) = notify {
+                        info!("Passkey: {:?}", unsafe { notify.ble_key.key_type })
+                    }
+                }),
+            )
+        });
+        GAP_CALLBACKS.lock().as_mut().and_then(|m| {
+            m.insert(
+                GapCallbacks::KeyEvent,
+                Box::new(|key| {
+                    if let GapEvent::Key(key) = key {
+                        info!("Key: {:?}", unsafe { key.ble_key.key_type });
+                    }
+                }),
+            )
+        });
+        GAP_CALLBACKS.lock().as_mut().and_then(|m| {
+            m.insert(
+                GapCallbacks::AuthComplete,
+                Box::new(|auth| {
+                    if let GapEvent::AuthenticationComplete(auth) = auth {
+                        info!("Auth: {:?}", unsafe { auth.auth_cmpl.success });
+                    }
+                }),
+            )
+        });
+        GAP_CALLBACKS
+            .lock()
+            .as_mut()
+            .and_then(|m| m.insert(GapCallbacks::NumericComparisonRequest, Box::new(|_| {
+                info!("Numeric comparison request");
+            })));
+        Ok(())
     }
 }
 
