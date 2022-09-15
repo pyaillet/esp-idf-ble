@@ -3,10 +3,11 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayMs;
 use esp_idf_ble::advertise::AdvertiseData;
 use esp_idf_ble::{
     AttributeValue, AutoResponse, BtUuid, EspBle, GattCharacteristic, GattDescriptor, GattService,
-    GattServiceEvent,
+    GattServiceEvent, ServiceUuid,
 };
 use esp_idf_hal::delay;
 // use esp_idf_hal::prelude::*;
@@ -51,7 +52,7 @@ fn main() {
     })
     .expect("Unable to register service");
 
-    let svc_uuid = BtUuid::Uuid16(0x00FF);
+    let svc_uuid = BtUuid::Uuid16(ServiceUuid::Battery as u16);
 
     let svc = GattService::new_primary(svc_uuid, 4, 1);
 
@@ -130,8 +131,7 @@ fn main() {
                 read.conn_id,
                 read.trans_id,
                 esp_gatt_status_t_ESP_GATT_OK,
-                &val
-
+                &val,
             )
             .expect("Unable to send read response");
         }
@@ -155,8 +155,8 @@ fn main() {
                         write.conn_id,
                         write.trans_id,
                         esp_gatt_status_t_ESP_GATT_OK,
-                        &[]
-                                            )
+                        &[],
+                    )
                     .expect("Unable to send response");
                 }
             }
@@ -202,6 +202,7 @@ fn main() {
     .expect("Failed to start advertising");
 
     loop {
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_millis(5000));
     }
+
 }

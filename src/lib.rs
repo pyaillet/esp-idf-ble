@@ -70,19 +70,29 @@ unsafe extern "C" fn gap_event_handler(
     debug!("Called gap event handler with event {{ {:#?} }}", &event);
 
     if let Some(cb) = GAP_CALLBACKS.lock().as_mut().and_then(|m| {
-        m.remove(match &event {
-            GapEvent::RawAdvertisingDatasetComplete(_) => &GapCallbacks::RawAdvertisingDataset,
-            GapEvent::RawScanResponseDatasetComplete(_) => &GapCallbacks::RawScanResponseDataset,
-            GapEvent::AdvertisingDatasetComplete(_) => &GapCallbacks::AdvertisingDataset,
-            GapEvent::ScanResponseDatasetComplete(_) => &GapCallbacks::ScanResponseDataset,
-            GapEvent::AdvertisingStartComplete(_) => &GapCallbacks::AdvertisingStart,
-            GapEvent::UpdateConnectionParamsComplete(_) => &GapCallbacks::UpdateConnectionParams,
-            GapEvent::PasskeyNotification(_) => &GapCallbacks::PasskeyNotify,
-            GapEvent::Key(_) => &GapCallbacks::KeyEvent,
-            GapEvent::AuthenticationComplete(_) => &GapCallbacks::AuthComplete,
-            GapEvent::NumericComparisonRequest => &GapCallbacks::NumericComparisonRequest,
-            _ => unimplemented!("{:?}", event),
+        (match &event {
+            GapEvent::RawAdvertisingDatasetComplete(_) => {
+                Some(&GapCallbacks::RawAdvertisingDataset)
+            }
+            GapEvent::RawScanResponseDatasetComplete(_) => {
+                Some(&GapCallbacks::RawScanResponseDataset)
+            }
+            GapEvent::AdvertisingDatasetComplete(_) => Some(&GapCallbacks::AdvertisingDataset),
+            GapEvent::ScanResponseDatasetComplete(_) => Some(&GapCallbacks::ScanResponseDataset),
+            GapEvent::AdvertisingStartComplete(_) => Some(&GapCallbacks::AdvertisingStart),
+            GapEvent::UpdateConnectionParamsComplete(_) => {
+                Some(&GapCallbacks::UpdateConnectionParams)
+            }
+            GapEvent::PasskeyNotification(_) => Some(&GapCallbacks::PasskeyNotify),
+            GapEvent::Key(_) => Some(&GapCallbacks::KeyEvent),
+            GapEvent::AuthenticationComplete(_) => Some(&GapCallbacks::AuthComplete),
+            GapEvent::NumericComparisonRequest => Some(&GapCallbacks::NumericComparisonRequest),
+            _ => {
+                warn!("Unimplemented {:?}", event);
+                None
+            }
         })
+        .and_then(|cb_key| m.remove(cb_key))
     }) {
         cb(event);
     } else {
@@ -684,12 +694,15 @@ impl EspBle {
                 }),
             )
         });
-        GAP_CALLBACKS
-            .lock()
-            .as_mut()
-            .and_then(|m| m.insert(GapCallbacks::NumericComparisonRequest, Box::new(|_| {
-                info!("Numeric comparison request");
-            })));
+
+        GAP_CALLBACKS.lock().as_mut().and_then(|m| {
+            m.insert(
+                GapCallbacks::NumericComparisonRequest,
+                Box::new(|_| {
+                    info!("Numeric comparison request");
+                }),
+            )
+        });
         Ok(())
     }
 }
