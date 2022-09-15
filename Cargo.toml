@@ -32,3 +32,5 @@ log = { version = "0.4" }
 embuild = "0.29"
 anyhow = "1"
 
+[package.metadata.espflash]
+partition_table = "partitions.csv"
