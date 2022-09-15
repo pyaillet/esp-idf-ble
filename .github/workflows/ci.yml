@@ -6,30 +6,48 @@ on:
     - main
 
 jobs:
-  build-nightly:
+#  build-nightly-xtensa:
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Install Rust for Xtensa
+#        uses: esp-rs/xtensa-toolchain@v1.1
+#        with:
+#          default: true
+#          ldproxy: true
+#
+#      - name: Release build std
+#        uses: actions-rs/cargo@v1
+#        with:
+#          command: build
+#          args: --release --all-features --examples
+
+  build-nightly-risc:
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+
     steps:
       - uses: actions/checkout@v2
       - name: Nightly with clippy
         uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
-          components: rust-src, clippy
+          components: rust-src
 
-      - name: Install Rust for Xtensa
-        uses: esp-rs/xtensa-toolchain@v1.1
-        with:
-          default: true
-          ldproxy: true
+      - name: Setup | ldproxy
+        run: cargo install ldproxy
+
       - name: Release build std
         uses: actions-rs/cargo@v1
         with:
           command: build
-          toolchain: nightly
-          args: --release --all-features --examples
+          args: --release --all-features --examples --target=riscv32imc-esp-espidf
 
   clippy:
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     steps:
       - uses: actions/checkout@v2
       - name: Nightly with clippy
@@ -37,44 +55,43 @@ jobs:
         with:
           toolchain: nightly
           components: rust-src, clippy
-      - name: Install Rust for Xtensa
-        uses: esp-rs/xtensa-toolchain@v1.1
-        with:
-          default: true
-          ldproxy: true
+
       - name: Annotate commit with clippy warnings std
         uses: actions-rs/clippy-check@v1
         with:
           toolchain: nightly
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --examples
+          args: --all-features --examples --target=riscv32imc-esp-espidf
 
   doc:
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     steps:
       - uses: actions/checkout@v2
       - name: Nightly
         uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
-      - name: Install Rust for Xtensa
-        uses: esp-rs/xtensa-toolchain@v1.1
-        with:
-          default: true
-          ldproxy: true
+          components: rust-src
+
       - name: Documentation build
         uses: actions-rs/cargo@v1
         with:
           command: doc
+          args: --target=riscv32imc-esp-espidf
 
   security-audit:
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     steps:
       - uses: actions/checkout@v2
       - name: Nightly
         uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
+
       - name: Security audit
         uses: actions-rs/audit-check@v1
         with:

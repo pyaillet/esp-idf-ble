@@ -20,85 +20,65 @@ pub use gatt::*;
 pub use gatt_client::*;
 pub use gatt_server::*;
 
-use smol::{channel::Sender, future::block_on};
-
-#[allow(unused, clippy::enum_variant_names)]
-#[derive(PartialEq, Eq, Hash)]
-enum GapCallbackType {
-    AdvertisingDatasetComplete,
-    ScanResponseDatasetComplete,
-    AdvertisingStartComplete,
-}
-
-#[allow(unused)]
-#[derive(PartialEq, Eq, Hash)]
-enum GattCallbackType {
-    Register(u16),
-}
-
 static DEFAULT_TAKEN: Mutex<bool> = Mutex::new(false);
 
 type Singleton<T> = Mutex<Option<T>>;
 
-static GAP_ADV_CONF_DATA: Singleton<Sender<Result<(), EspError>>> = Mutex::new(Option::None);
-static GAP_ADV_CONF_DATA_RAW: Singleton<Sender<Result<(), EspError>>> = Mutex::new(Option::None);
-static GAP_ADV_SCAN_RSP_DATA: Singleton<Sender<Result<(), EspError>>> = Mutex::new(Option::None);
-static GAP_ADV_SCAN_RSP_DATA_RAW: Singleton<Sender<Result<(), EspError>>> =
-    Mutex::new(Option::None);
-static GAP_ADV_START: Singleton<Sender<Result<(), EspError>>> = Mutex::new(Option::None);
-static GATTS_REG_APP: Singleton<HashMap<u16, Sender<Result<esp_gatt_if_t, EspError>>>> =
-    Mutex::new(Option::None);
-static GATTS_CREATE_SVC: Singleton<HashMap<esp_gatt_if_t, Sender<Result<u16, EspError>>>> =
-    Mutex::new(Option::None);
-static GATTS_START_SVC: Singleton<HashMap<u16, Sender<Result<(), EspError>>>> =
-    Mutex::new(Option::None);
-static GATTS_ADD_CHAR: Singleton<HashMap<u16, Sender<Result<u16, EspError>>>> =
-    Mutex::new(Option::None);
-static GATTS_ADD_CDESC: Singleton<HashMap<u16, Sender<Result<u16, EspError>>>> =
-    Mutex::new(Option::None);
-
-macro_rules! event_send {
-    ($event:expr, $send:expr, $param:expr) => {
-        if let Some(sender) = $send.lock().as_mut().take() {
-            if sender.send($param).await.is_err() {
-                error!("Error sending event: {:?}", $event);
-            }
-        } else {
-            warn!("No sender registered for: {:?}", $event);
-        }
-    };
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+enum GapCallbacks {
+    RawAdvertisingDataset,
+    RawScanResponseDataset,
+    AdvertisingDataset,
+    ScanResponseDataset,
+    AdvertisingStart,
+    UpdateConnectionParams,
 }
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+enum GattCallbacks {
+    Register(u16),              // app_id
+    Create(u8),                 // gatts_if
+    Start(u16),                 // svc_handle
+    AddCharacteristic(u16),     // svc_handle
+    AddCharacteristicDesc(u16), // svc_handle
+    Read(u16),                  // attr_handle
+    Write(u16),                 // attr_handle
+}
+
+#[allow(clippy::type_complexity)]
+static GAP_CALLBACKS: Singleton<HashMap<GapCallbacks, Box<dyn Fn(GapEvent) + Send>>> =
+    Mutex::new(Option::None);
+#[allow(clippy::type_complexity)]
+static GATT_CALLBACKS_ONE_TIME: Singleton<
+    HashMap<GattCallbacks, Box<dyn Fn(u8, GattServiceEvent) + Send>>,
+> = Mutex::new(Option::None);
+#[allow(clippy::type_complexity)]
+static GATT_CALLBACKS_KEPT: Singleton<
+    HashMap<GattCallbacks, Box<dyn Fn(u8, GattServiceEvent) + Send>>,
+> = Mutex::new(Option::None);
 
 unsafe extern "C" fn gap_event_handler(
     event: esp_gap_ble_cb_event_t,
     param: *mut esp_ble_gap_cb_param_t,
 ) {
     let event = GapEvent::build(event, param);
-    info!("Called gap event handler with event {{ {:#?} }}", &event);
+    debug!("Called gap event handler with event {{ {:#?} }}", &event);
 
-    block_on(async {
-        match event {
-            GapEvent::RawAdvertisingDatasetComplete(adv) => {
-                event_send!(event, GAP_ADV_CONF_DATA_RAW, esp!(adv.status));
-            }
-            GapEvent::RawScanResponseDatasetComplete(rsp) => {
-                event_send!(event, GAP_ADV_SCAN_RSP_DATA_RAW, esp!(rsp.status));
-            }
-            GapEvent::AdvertisingDatasetComplete(adv) => {
-                event_send!(event, GAP_ADV_CONF_DATA, esp!(adv.status));
-            }
-            GapEvent::ScanResponseDatasetComplete(rsp) => {
-                event_send!(event, GAP_ADV_SCAN_RSP_DATA, esp!(rsp.status));
-            }
-            GapEvent::AdvertisingStartComplete(start) => {
-                event_send!(event, GAP_ADV_START, esp!(start.status));
-            }
-            GapEvent::UpdateConnectionParamsComplete(params) => {
-                info!("Updated connection params: {:?}", &params);
-            }
-            _ => warn!("Unhandled event"),
-        }
-    });
+    if let Some(cb) = GAP_CALLBACKS.lock().as_mut().and_then(|m| {
+        m.remove(match &event {
+            GapEvent::RawAdvertisingDatasetComplete(_) => &GapCallbacks::RawAdvertisingDataset,
+            GapEvent::RawScanResponseDatasetComplete(_) => &GapCallbacks::RawScanResponseDataset,
+            GapEvent::AdvertisingDatasetComplete(_) => &GapCallbacks::AdvertisingDataset,
+            GapEvent::ScanResponseDatasetComplete(_) => &GapCallbacks::ScanResponseDataset,
+            GapEvent::AdvertisingStartComplete(_) => &GapCallbacks::AdvertisingStart,
+            GapEvent::UpdateConnectionParamsComplete(_) => &GapCallbacks::UpdateConnectionParams,
+            _ => unimplemented!("{:?}", event),
+        })
+    }) {
+        cb(event);
+    } else {
+        warn!("No callbak registered for event: {:?}", event);
+    }
 }
 
 unsafe extern "C" fn gatts_event_handler(
@@ -107,125 +87,131 @@ unsafe extern "C" fn gatts_event_handler(
     param: *mut esp_ble_gatts_cb_param_t,
 ) {
     let event = GattServiceEvent::build(event, param);
-    info!(
+    debug!(
         "Called gatt service event handler with gatts_if: {}, event {{ {:#?} }}",
         gatts_if, &event
     );
 
-    block_on(async {
-        match event {
-            GattServiceEvent::Register(register) => {
-                let param = esp!(register.status).and(Ok(gatts_if));
-                if let Some(s) = GATTS_REG_APP
-                    .lock()
-                    .as_mut()
-                    .and_then(|m| m.remove(&register.app_id))
-                {
-                    if s.send(param).await.is_err() {
-                        error!("Error sending event: {:?}", event);
-                    };
-                } else {
-                    warn!("No sender registered for: {:?}", event);
-                }
+    match &event {
+        GattServiceEvent::Register(reg) => {
+            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
+                .lock()
+                .as_mut()
+                .and_then(|m| m.remove(&GattCallbacks::Register(reg.app_id)))
+            {
+                cb(gatts_if, event);
+            } else {
+                warn!(
+                    "No callback registered for Register with app_id: {}",
+                    reg.app_id
+                );
             }
-            GattServiceEvent::Create(create) => {
-                if let Some(s) = GATTS_CREATE_SVC
-                    .lock()
-                    .as_mut()
-                    .and_then(|m| m.remove(&gatts_if))
-                {
-                    if s.send(esp!(create.status).map(|_| create.service_handle))
-                        .await
-                        .is_err()
-                    {
-                        error!("Error sending event: {:?}", event);
-                    };
-                } else {
-                    warn!(
-                        "No sender registered for: {:?} {{ gatts_if: {}, handle: {} }}",
-                        event, gatts_if, create.service_handle
-                    );
-                }
-            }
-            GattServiceEvent::StartComplete(start) => {
-                if let Some(s) = GATTS_START_SVC
-                    .lock()
-                    .as_mut()
-                    .and_then(|m| m.remove(&start.service_handle))
-                {
-                    if s.send(esp!(start.status)).await.is_err() {
-                        error!("Error sending event: {:?}", event);
-                    };
-                } else {
-                    warn!(
-                        "No sender registered for: {:?} {{ gatts_if: {}, handle: {} }}",
-                        event, gatts_if, start.service_handle
-                    );
-                }
-            }
-            GattServiceEvent::AddCharacteristicComplete(add) => {
-                if let Some(s) = GATTS_ADD_CHAR
-                    .lock()
-                    .as_mut()
-                    .and_then(|m| m.remove(&add.service_handle))
-                {
-                    if s.send(esp!(add.status).map(|_| add.attr_handle))
-                        .await
-                        .is_err()
-                    {
-                        error!("Error sending event: {:?}", event);
-                    };
-                } else {
-                    warn!(
-                        "No sender registered for: {:?} {{ gatts_if: {}, handle: {} }}",
-                        event, gatts_if, add.service_handle
-                    );
-                }
-            }
-            GattServiceEvent::AddDescriptorComplete(add) => {
-                if let Some(s) = GATTS_ADD_CDESC
-                    .lock()
-                    .as_mut()
-                    .and_then(|m| m.remove(&add.service_handle))
-                {
-                    if s.send(esp!(add.status).map(|_| add.attr_handle))
-                        .await
-                        .is_err()
-                    {
-                        error!("Error sending event: {:?}", event);
-                    };
-                } else {
-                    warn!(
-                        "No sender registered for: {:?} {{ gatts_if: {}, handle: {} }}",
-                        event, gatts_if, add.service_handle
-                    );
-                }
-            }
-            GattServiceEvent::Connect(conn) => {
-                let mut conn_params: esp_ble_conn_update_params_t = esp_ble_conn_update_params_t {
-                    bda: conn.remote_bda,
-                    min_int: 0x10, // min_int = 0x10*1.25ms = 20ms
-                    max_int: 0x20, // max_int = 0x20*1.25ms = 40ms
-                    latency: 0,
-                    timeout: 400,  // timeout = 400*10ms = 4000ms
-                };
-                                           //
-                info!("Connection from: {:?}", conn);
-
-                let _ = esp!(esp_ble_gap_update_conn_params(&mut conn_params));
-            }
-            _ => warn!("Unhandled event"),
         }
-    })
-}
+        GattServiceEvent::Create(_) => {
+            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
+                .lock()
+                .as_mut()
+                .and_then(|m| m.remove(&GattCallbacks::Create(gatts_if)))
+            {
+                cb(gatts_if, event);
+            } else {
+                warn!(
+                    "No callback registered for Create with gatts_if: {}",
+                    gatts_if
+                );
+            }
+        }
+        GattServiceEvent::StartComplete(start) => {
+            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
+                .lock()
+                .as_mut()
+                .and_then(|m| m.remove(&GattCallbacks::Start(start.service_handle)))
+            {
+                cb(gatts_if, event);
+            } else {
+                warn!(
+                    "No callback registered for Start with svc_handle: {}",
+                    start.service_handle
+                );
+            }
+        }
+        GattServiceEvent::AddCharacteristicComplete(add_char) => {
+            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
+                .lock()
+                .as_mut()
+                .and_then(|m| m.remove(&GattCallbacks::AddCharacteristic(add_char.service_handle)))
+            {
+                cb(gatts_if, event);
+            } else {
+                warn!(
+                    "No callback registered for AddChar with svc_handle: {}",
+                    add_char.service_handle
+                );
+            }
+        }
+        GattServiceEvent::AddDescriptorComplete(add_desc) => {
+            if let Some(cb) = GATT_CALLBACKS_ONE_TIME.lock().as_mut().and_then(|m| {
+                m.remove(&GattCallbacks::AddCharacteristicDesc(
+                    add_desc.service_handle,
+                ))
+            }) {
+                cb(gatts_if, event);
+            } else {
+                warn!(
+                    "No callback registered for AddDesc with svc_handle: {}",
+                    add_desc.service_handle
+                );
+            }
+        }
+        GattServiceEvent::Connect(conn) => {
+            let mut conn_params: esp_ble_conn_update_params_t = esp_ble_conn_update_params_t {
+                bda: conn.remote_bda,
+                min_int: 0x10, // min_int = 0x10*1.25ms = 20ms
+                max_int: 0x20, // max_int = 0x20*1.25ms = 40ms
+                latency: 0,
+                timeout: 400, // timeout = 400*10ms = 4000ms
+            };
+            //
+            info!("Connection from: {:?}", conn);
 
-trait BleChar {}
+            let _ = esp!(esp_ble_gap_update_conn_params(&mut conn_params));
+        }
+        GattServiceEvent::Read(read) => {
+            if let Some(cb) = GATT_CALLBACKS_KEPT
+                .lock()
+                .as_mut()
+                .and_then(|m| m.get(&GattCallbacks::Read(read.handle)))
+            {
+                cb(gatts_if, event);
+            } else {
+                warn!(
+                    "No callback registered for Read with handle: {}",
+                    read.handle
+                );
+            }
+        }
+        GattServiceEvent::Write(write) => {
+            if let Some(cb) = GATT_CALLBACKS_KEPT
+                .lock()
+                .as_mut()
+                .and_then(|m| m.get(&GattCallbacks::Write(write.handle)))
+            {
+                cb(gatts_if, event);
+            } else {
+                warn!(
+                    "No callback registered for Write with handle: {}",
+                    write.handle
+                );
+            }
+        }
+        _ => warn!("Handler for {:?} not implemented", event),
+    }
+}
 
 #[allow(dead_code)]
 pub struct EspBle {
     device_name: String,
     nvs: Arc<EspDefaultNvs>,
-    applications: HashMap<esp_gatt_if_t, Arc<Mutex<GattApplication>>>,
 }
 
 impl EspBle {
@@ -238,11 +224,9 @@ impl EspBle {
 
         let ble = Self::init(device_name, nvs)?;
 
-        *GATTS_REG_APP.lock() = Some(HashMap::new());
-        *GATTS_CREATE_SVC.lock() = Some(HashMap::new());
-        *GATTS_START_SVC.lock() = Some(HashMap::new());
-        *GATTS_ADD_CHAR.lock() = Some(HashMap::new());
-        *GATTS_ADD_CDESC.lock() = Some(HashMap::new());
+        *GAP_CALLBACKS.lock() = Some(HashMap::new());
+        *GATT_CALLBACKS_ONE_TIME.lock() = Some(HashMap::new());
+        *GATT_CALLBACKS_KEPT.lock() = Some(HashMap::new());
 
         *taken = true;
         Ok(ble)
@@ -363,45 +347,38 @@ impl EspBle {
         let device_name_cstr = CString::new(device_name.clone()).unwrap();
         esp!(unsafe { esp_ble_gap_set_device_name(device_name_cstr.as_ptr() as _) })?;
 
-        Ok(EspBle {
-            device_name,
-            nvs,
-            applications: HashMap::new(),
-        })
+        Ok(EspBle { device_name, nvs })
     }
 
-    pub async fn configure_advertising_data_raw(
+    pub fn configure_advertising_data_raw(
         &self,
         data: RawAdvertiseData,
+        cb: impl Fn(GapEvent) + 'static + Send,
     ) -> Result<(), EspError> {
         info!("configure_advertising_data_raw enter");
 
-        let (s, r) = smol::channel::bounded(1);
-
         let (raw_data, raw_len) = data.as_raw_data();
 
-        if data.set_scan_rsp {
-            *GAP_ADV_SCAN_RSP_DATA_RAW.lock() = Some(s);
-            esp!(unsafe { esp_ble_gap_config_scan_rsp_data_raw(raw_data, raw_len) })?;
-        } else {
-            *GAP_ADV_CONF_DATA_RAW.lock() = Some(s);
-            esp!(unsafe { esp_ble_gap_config_adv_data_raw(raw_data, raw_len) })?;
-        }
-
-        info!("configure_advertising_data_raw exit");
-
-        r.recv()
-            .await
-            .unwrap_or_else(|_| esp!(ESP_ERR_INVALID_STATE))
+        GAP_CALLBACKS
+            .lock()
+            .as_mut()
+            .map_or(esp!(ESP_ERR_INVALID_STATE), |m| {
+                if data.set_scan_rsp {
+                    m.insert(GapCallbacks::RawScanResponseDataset, Box::new(cb));
+                    esp!(unsafe { esp_ble_gap_config_scan_rsp_data_raw(raw_data, raw_len) })
+                } else {
+                    m.insert(GapCallbacks::AdvertisingDataset, Box::new(cb));
+                    esp!(unsafe { esp_ble_gap_config_adv_data_raw(raw_data, raw_len) })
+                }
+            })
     }
 
-    pub async fn configure_advertising_data(
+    pub fn configure_advertising_data(
         &self,
         data: advertise::AdvertiseData,
+        cb: impl Fn(GapEvent) + 'static + Send,
     ) -> Result<(), EspError> {
         info!("configure_advertising enter");
-
-        let (s, r) = smol::channel::bounded(1);
 
         let manufacturer_len = data.manufacturer.as_ref().map(|m| m.len()).unwrap_or(0) as u16;
         let service_data_len = data.service.as_ref().map(|s| s.len()).unwrap_or(0) as u16;
@@ -428,6 +405,8 @@ impl EspBle {
                 }
             })
             .unwrap_or(0);
+
+        let is_scan_rsp = data.set_scan_rsp;
 
         info!("svc_uuid: {{ {:?} }}", &svc_uuid.uuid);
         let mut adv_data = esp_ble_adv_data_t {
@@ -461,24 +440,20 @@ impl EspBle {
             flag: data.flag,
         };
 
-        if data.set_scan_rsp {
-            *GAP_ADV_SCAN_RSP_DATA.lock() = Some(s);
-        } else {
-            *GAP_ADV_CONF_DATA.lock() = Some(s);
-        }
+        if let Some(m) = GAP_CALLBACKS.lock().as_mut() {
+            if is_scan_rsp {
+                m.insert(GapCallbacks::ScanResponseDataset, Box::new(cb));
+            } else {
+                m.insert(GapCallbacks::AdvertisingDataset, Box::new(cb));
+            }
+        };
 
         info!("Configuring advertising with {{ {:?} }}", &adv_data);
 
-        esp!(unsafe { esp_ble_gap_config_adv_data(&mut adv_data) })?;
-
-        info!("configure_advertising exit");
-
-        r.recv()
-            .await
-            .unwrap_or_else(|_| esp!(ESP_ERR_INVALID_STATE))
+        esp!(unsafe { esp_ble_gap_config_adv_data(&mut adv_data) })
     }
 
-    pub async fn start_advertise(&self) -> Result<(), EspError> {
+    pub fn start_advertise(&self, cb: impl Fn(GapEvent) + 'static + Send) -> Result<(), EspError> {
         info!("start_advertise enter");
 
         let mut adv_param: esp_ble_adv_params_t = esp_ble_adv_params_t {
@@ -491,53 +466,40 @@ impl EspBle {
             channel_map: 0x07,       // ADV_CHNL_ALL,
             adv_filter_policy: 0x00, // ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
         };
-        let (s, r) = smol::channel::bounded(1);
 
-        *GAP_ADV_START.lock() = Some(s);
-
-        esp!(unsafe { esp_ble_gap_start_advertising(&mut adv_param) })?;
-
-        info!("start_advertise exit");
-        r.recv()
-            .await
-            .unwrap_or_else(|_| esp!(ESP_ERR_INVALID_STATE))
-    }
-
-    pub async fn register_gatt_service_application(
-        &mut self,
-        application: Arc<Mutex<gatt_server::GattApplication>>,
-    ) -> Result<(), EspError> {
-        info!("register_gatt_service_application enter");
-        let application_id: u16 = application.lock().get_id();
-
-        let (s, r) = smol::channel::bounded(1);
-
-        GATTS_REG_APP
+        GAP_CALLBACKS
             .lock()
             .as_mut()
-            .and_then(|m| m.insert(application_id, s));
-
-        esp!(unsafe { esp_ble_gatts_app_register(application_id) })?;
-
-        let gatt_if = match r.recv().await {
-            Ok(r) => r,
-            Err(_) => Err(EspError::from(ESP_ERR_INVALID_STATE).unwrap()),
-        }?;
-
-        (*application.lock()).register(gatt_if);
-        self.applications.insert(gatt_if, application);
-
-        info!("register_gatt_service_application exit");
-
-        Ok(())
+            .map_or(esp!(ESP_ERR_INVALID_STATE), |m| {
+                m.insert(GapCallbacks::AdvertisingStart, Box::new(cb));
+                esp!(unsafe { esp_ble_gap_start_advertising(&mut adv_param) })
+            })
     }
 
-    pub async fn create_service(
+    pub fn register_gatt_service_application(
+        &mut self,
+        app_id: u16,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
+    ) -> Result<(), EspError> {
+        info!(
+            "register_gatt_service_application enter for app_id: {}",
+            app_id
+        );
+        if let Some(m) = GATT_CALLBACKS_ONE_TIME.lock().as_mut() {
+            m.insert(GattCallbacks::Register(app_id), Box::new(cb));
+        } else {
+            panic!("Unable to add callback");
+        }
+
+        esp!(unsafe { esp_ble_gatts_app_register(app_id) })
+    }
+
+    pub fn create_service(
         &self,
-        application: Arc<Mutex<gatt_server::GattApplication>>,
+        gatt_if: u8,
         svc: GattService,
-    ) -> Result<u16, EspError> {
-        let gatt_if = application.lock().get_gatt_if()?;
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
+    ) -> Result<(), EspError> {
         let svc_uuid: esp_bt_uuid_t = svc.id.into();
 
         let mut svc_id: esp_gatt_srvc_id_t = esp_gatt_srvc_id_t {
@@ -548,34 +510,25 @@ impl EspBle {
             },
         };
 
-        let (s, r) = smol::channel::bounded(1);
-
-        GATTS_CREATE_SVC
+        GATT_CALLBACKS_ONE_TIME
             .lock()
             .as_mut()
-            .and_then(|m| m.insert(gatt_if, s));
+            .and_then(|m| m.insert(GattCallbacks::Create(gatt_if), Box::new(cb)));
 
-        esp!(unsafe { esp_ble_gatts_create_service(gatt_if, &mut svc_id, svc.handle) })?;
-
-        match r.recv().await {
-            Ok(r) => r,
-            Err(_) => Err(EspError::from(ESP_ERR_INVALID_STATE).unwrap()),
-        }
+        esp!(unsafe { esp_ble_gatts_create_service(gatt_if, &mut svc_id, svc.handle) })
     }
 
-    pub async fn start_service(&self, svc_handle: u16) -> Result<(), EspError> {
-        let (s, r) = smol::channel::bounded(1);
-
-        GATTS_START_SVC
+    pub fn start_service(
+        &self,
+        svc_handle: u16,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
+    ) -> Result<(), EspError> {
+        GATT_CALLBACKS_ONE_TIME
             .lock()
             .as_mut()
-            .and_then(|m| m.insert(svc_handle, s));
+            .and_then(|m| m.insert(GattCallbacks::Start(svc_handle), Box::new(cb)));
 
-        esp!(unsafe { esp_ble_gatts_start_service(svc_handle) })?;
-
-        r.recv()
-            .await
-            .unwrap_or_else(|_| esp!(ESP_ERR_INVALID_STATE))
+        esp!(unsafe { esp_ble_gatts_start_service(svc_handle) })
     }
 
     pub fn read_attribute_value(&self, attr_handle: u16) -> Result<Vec<u8>, EspError> {
@@ -595,17 +548,16 @@ impl EspBle {
         }
     }
 
-    pub async fn add_characteristic<const S: usize>(
+    pub fn add_characteristic<const S: usize>(
         &self,
         svc_handle: u16,
         charac: GattCharacteristic<S>,
-    ) -> Result<u16, EspError> {
-        let (s, r) = smol::channel::bounded(1);
-
-        GATTS_ADD_CHAR
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
+    ) -> Result<(), EspError> {
+        GATT_CALLBACKS_ONE_TIME
             .lock()
             .as_mut()
-            .and_then(|m| m.insert(svc_handle, s));
+            .and_then(|m| m.insert(GattCallbacks::AddCharacteristic(svc_handle), Box::new(cb)));
 
         let mut uuid = charac.uuid.into();
 
@@ -621,25 +573,21 @@ impl EspBle {
                 &mut value,
                 &mut auto_rsp,
             )
-        })?;
-
-        match r.recv().await {
-            Ok(r) => r,
-            Err(_) => Err(EspError::from(ESP_ERR_INVALID_STATE).unwrap()),
-        }
+        })
     }
 
-    pub async fn add_characteristic_desc(
+    pub fn add_descriptor(
         &self,
         svc_handle: u16,
-        char_desc: GattCharacteristicDesc,
-    ) -> Result<u16, EspError> {
-        let (s, r) = smol::channel::bounded(1);
-
-        GATTS_ADD_CDESC
-            .lock()
-            .as_mut()
-            .and_then(|m| m.insert(svc_handle, s));
+        char_desc: GattDescriptor,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
+    ) -> Result<(), EspError> {
+        GATT_CALLBACKS_ONE_TIME.lock().as_mut().and_then(|m| {
+            m.insert(
+                GattCallbacks::AddCharacteristicDesc(svc_handle),
+                Box::new(cb),
+            )
+        });
 
         let mut uuid = char_desc.uuid.into();
 
@@ -651,11 +599,48 @@ impl EspBle {
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
             )
-        })?;
-
-        match r.recv().await {
-            Ok(r) => r,
-            Err(_) => Err(EspError::from(ESP_ERR_INVALID_STATE).unwrap()),
-        }
+        })
     }
+
+    pub fn register_read_handler(
+        &self,
+        attr_handle: u16,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
+    ) {
+        GATT_CALLBACKS_KEPT
+            .lock()
+            .as_mut()
+            .and_then(|m| m.insert(GattCallbacks::Read(attr_handle), Box::new(cb)));
+    }
+    pub fn register_write_handler(
+        &self,
+        attr_handle: u16,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
+    ) {
+        GATT_CALLBACKS_KEPT
+            .lock()
+            .as_mut()
+            .and_then(|m| m.insert(GattCallbacks::Write(attr_handle), Box::new(cb)));
+    }
+}
+
+pub fn send(
+    gatts_if: u8,
+    handle: u16,
+    conn_id: u16,
+    trans_id: u32,
+    status: u32,
+    data: &[u8],
+) -> Result<(), EspError> {
+    let mut rsp: esp_gatt_rsp_t = esp_gatt_rsp_t::default();
+
+    esp!(unsafe {
+        rsp.handle = handle;
+        rsp.attr_value.len = data.len() as u16;
+        if data.len() > 0 {
+            rsp.attr_value.value[..data.len()].copy_from_slice(data);
+        }
+
+        esp_ble_gatts_send_response(gatts_if, conn_id, trans_id, status, &mut rsp)
+    })
 }
