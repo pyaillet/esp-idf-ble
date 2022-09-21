@@ -11,6 +11,8 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
+        env:
+          RUSTUP_TOOLCHAIN: nightly
       - name: Security audit
         uses: actions-rs/audit-check@v1
         with:
