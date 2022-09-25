@@ -1,8 +1,9 @@
-pub mod advertise;
-pub mod gap;
-pub mod gatt;
-pub mod gatt_client;
-pub mod gatt_server;
+mod advertise;
+mod gap;
+mod gatt;
+mod gatt_client;
+mod gatt_server;
+mod security;
 
 use std::{collections::HashMap, ffi::CString, sync::Arc};
 
@@ -15,10 +16,12 @@ use esp_idf_sys::*;
 
 use esp_idf_hal::mutex::Mutex;
 
+pub use advertise::*;
 pub use gap::*;
 pub use gatt::*;
 pub use gatt_client::*;
 pub use gatt_server::*;
+pub use security::*;
 
 static DEFAULT_TAKEN: Mutex<bool> = Mutex::new(false);
 
@@ -36,6 +39,7 @@ enum GapCallbacks {
     KeyEvent,
     AuthComplete,
     NumericComparisonRequest,
+    SecurityRequest,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
@@ -62,6 +66,30 @@ static GATT_CALLBACKS_KEPT: Singleton<
     HashMap<GattCallbacks, Box<dyn Fn(u8, GattServiceEvent) + Send>>,
 > = Mutex::new(Option::None);
 
+fn insert_gatt_cb_kept(cb_key: GattCallbacks, cb: impl Fn(u8, GattServiceEvent) + Send + 'static) {
+    GATT_CALLBACKS_KEPT
+        .lock()
+        .as_mut()
+        .and_then(|m| m.insert(cb_key, Box::new(cb)));
+}
+
+fn insert_gatt_cb_onetime(
+    cb_key: GattCallbacks,
+    cb: impl Fn(u8, GattServiceEvent) + Send + 'static,
+) {
+    GATT_CALLBACKS_ONE_TIME
+        .lock()
+        .as_mut()
+        .and_then(|m| m.insert(cb_key, Box::new(cb)));
+}
+
+fn insert_gap_cb(cb_key: GapCallbacks, cb: impl Fn(GapEvent) + Send + 'static) {
+    GAP_CALLBACKS
+        .lock()
+        .as_mut()
+        .and_then(|m| m.insert(cb_key, Box::new(cb)));
+}
+
 unsafe extern "C" fn gap_event_handler(
     event: esp_gap_ble_cb_event_t,
     param: *mut esp_ble_gap_cb_param_t,
@@ -86,7 +114,7 @@ unsafe extern "C" fn gap_event_handler(
             GapEvent::PasskeyNotification(_) => Some(&GapCallbacks::PasskeyNotify),
             GapEvent::Key(_) => Some(&GapCallbacks::KeyEvent),
             GapEvent::AuthenticationComplete(_) => Some(&GapCallbacks::AuthComplete),
-            GapEvent::NumericComparisonRequest => Some(&GapCallbacks::NumericComparisonRequest),
+            GapEvent::NumericComparisonRequest(_) => Some(&GapCallbacks::NumericComparisonRequest),
             _ => {
                 warn!("Unimplemented {:?}", event);
                 None
@@ -385,18 +413,19 @@ impl EspBle {
 
         let (raw_data, raw_len) = data.as_raw_data();
 
-        GAP_CALLBACKS
-            .lock()
-            .as_mut()
-            .map_or(esp!(ESP_ERR_INVALID_STATE), |m| {
-                if data.set_scan_rsp {
-                    m.insert(GapCallbacks::RawScanResponseDataset, Box::new(cb));
-                    esp!(unsafe { esp_ble_gap_config_scan_rsp_data_raw(raw_data, raw_len) })
-                } else {
-                    m.insert(GapCallbacks::AdvertisingDataset, Box::new(cb));
-                    esp!(unsafe { esp_ble_gap_config_adv_data_raw(raw_data, raw_len) })
-                }
-            })
+        insert_gap_cb(
+            if data.set_scan_rsp {
+                GapCallbacks::RawScanResponseDataset
+            } else {
+                GapCallbacks::AdvertisingDataset
+            },
+            cb,
+        );
+        if data.set_scan_rsp {
+            esp!(unsafe { esp_ble_gap_config_scan_rsp_data_raw(raw_data, raw_len) })
+        } else {
+            esp!(unsafe { esp_ble_gap_config_adv_data_raw(raw_data, raw_len) })
+        }
     }
 
     pub fn configure_advertising_data(
@@ -466,12 +495,10 @@ impl EspBle {
             flag: data.flag,
         };
 
-        if let Some(m) = GAP_CALLBACKS.lock().as_mut() {
-            if is_scan_rsp {
-                m.insert(GapCallbacks::ScanResponseDataset, Box::new(cb));
-            } else {
-                m.insert(GapCallbacks::AdvertisingDataset, Box::new(cb));
-            }
+        if is_scan_rsp {
+            insert_gap_cb(GapCallbacks::ScanResponseDataset, cb);
+        } else {
+            insert_gap_cb(GapCallbacks::AdvertisingDataset, cb);
         };
 
         info!("Configuring advertising with {{ {:?} }}", &adv_data);
@@ -493,13 +520,8 @@ impl EspBle {
             adv_filter_policy: 0x00, // ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
         };
 
-        GAP_CALLBACKS
-            .lock()
-            .as_mut()
-            .map_or(esp!(ESP_ERR_INVALID_STATE), |m| {
-                m.insert(GapCallbacks::AdvertisingStart, Box::new(cb));
-                esp!(unsafe { esp_ble_gap_start_advertising(&mut adv_param) })
-            })
+        insert_gap_cb(GapCallbacks::AdvertisingStart, cb);
+        esp!(unsafe { esp_ble_gap_start_advertising(&mut adv_param) })
     }
 
     pub fn register_gatt_service_application(
@@ -511,12 +533,7 @@ impl EspBle {
             "register_gatt_service_application enter for app_id: {}",
             app_id
         );
-        if let Some(m) = GATT_CALLBACKS_ONE_TIME.lock().as_mut() {
-            m.insert(GattCallbacks::Register(app_id), Box::new(cb));
-        } else {
-            panic!("Unable to add callback");
-        }
-
+        insert_gatt_cb_onetime(GattCallbacks::Register(app_id), cb);
         esp!(unsafe { esp_ble_gatts_app_register(app_id) })
     }
 
@@ -535,11 +552,7 @@ impl EspBle {
                 inst_id: svc.instance_id,
             },
         };
-
-        GATT_CALLBACKS_ONE_TIME
-            .lock()
-            .as_mut()
-            .and_then(|m| m.insert(GattCallbacks::Create(gatt_if), Box::new(cb)));
+        insert_gatt_cb_onetime(GattCallbacks::Create(gatt_if), cb);
 
         esp!(unsafe { esp_ble_gatts_create_service(gatt_if, &mut svc_id, svc.handle) })
     }
@@ -549,10 +562,7 @@ impl EspBle {
         svc_handle: u16,
         cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
     ) -> Result<(), EspError> {
-        GATT_CALLBACKS_ONE_TIME
-            .lock()
-            .as_mut()
-            .and_then(|m| m.insert(GattCallbacks::Start(svc_handle), Box::new(cb)));
+        insert_gatt_cb_onetime(GattCallbacks::Start(svc_handle), cb);
 
         esp!(unsafe { esp_ble_gatts_start_service(svc_handle) })
     }
@@ -580,10 +590,7 @@ impl EspBle {
         charac: GattCharacteristic<S>,
         cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
     ) -> Result<(), EspError> {
-        GATT_CALLBACKS_ONE_TIME
-            .lock()
-            .as_mut()
-            .and_then(|m| m.insert(GattCallbacks::AddCharacteristic(svc_handle), Box::new(cb)));
+        insert_gatt_cb_onetime(GattCallbacks::AddCharacteristic(svc_handle), cb);
 
         let mut uuid = charac.uuid.into();
 
@@ -608,12 +615,7 @@ impl EspBle {
         char_desc: GattDescriptor,
         cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
     ) -> Result<(), EspError> {
-        GATT_CALLBACKS_ONE_TIME.lock().as_mut().and_then(|m| {
-            m.insert(
-                GattCallbacks::AddCharacteristicDesc(svc_handle),
-                Box::new(cb),
-            )
-        });
+        insert_gatt_cb_onetime(GattCallbacks::AddCharacteristicDesc(svc_handle), cb);
 
         let mut uuid = char_desc.uuid.into();
 
@@ -628,15 +630,20 @@ impl EspBle {
         })
     }
 
+    pub fn register_connect_handler(
+        &self,
+        gatts_if: u8,
+        cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
+    ) {
+        insert_gatt_cb_kept(GattCallbacks::Connect(gatts_if), cb);
+    }
+
     pub fn register_read_handler(
         &self,
         attr_handle: u16,
         cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
     ) {
-        GATT_CALLBACKS_KEPT
-            .lock()
-            .as_mut()
-            .and_then(|m| m.insert(GattCallbacks::Read(attr_handle), Box::new(cb)));
+        insert_gatt_cb_kept(GattCallbacks::Read(attr_handle), cb);
     }
 
     pub fn register_write_handler(
@@ -644,66 +651,148 @@ impl EspBle {
         attr_handle: u16,
         cb: impl Fn(u8, GattServiceEvent) + 'static + Send,
     ) {
-        GATT_CALLBACKS_KEPT
-            .lock()
-            .as_mut()
-            .and_then(|m| m.insert(GattCallbacks::Write(attr_handle), Box::new(cb)));
+        insert_gatt_cb_kept(GattCallbacks::Write(attr_handle), cb);
     }
 
-    pub fn configure_security(&self, gatts_if: u8, sec: u32) -> Result<(), EspError> {
-        GATT_CALLBACKS_KEPT.lock().as_mut().and_then(move |m| {
-            m.insert(
-                GattCallbacks::Connect(gatts_if),
-                Box::new(move |_gatts_if, connect| {
-                    if let GattServiceEvent::Connect(mut connect) = connect {
-                        esp!(unsafe {
-                            esp_ble_set_encryption(connect.remote_bda.as_mut_ptr(), sec)
-                        })
-                        .expect("Unable to set security level");
-                    }
-                }),
+    pub fn configure_security(&self, config: SecurityConfig) -> Result<(), EspError> {
+        esp!(unsafe {
+            esp_ble_gap_set_security_param(
+                esp_ble_sm_param_t_ESP_BLE_SM_AUTHEN_REQ_MODE,
+                config.auth_req_mode.into(),
+                std::mem::size_of::<u8>() as _,
             )
+        })
+        .expect("auth req mode");
+
+        esp!(unsafe {
+            esp_ble_gap_set_security_param(
+                esp_ble_sm_param_t_ESP_BLE_SM_IOCAP_MODE,
+                config.io_capabilities.into(),
+                std::mem::size_of::<u8>() as _,
+            )
+        })
+        .expect("sm iocap mode");
+
+        if let Some(initiator_key) = config.initiator_key {
+            esp!(unsafe {
+                esp_ble_gap_set_security_param(
+                    esp_ble_sm_param_t_ESP_BLE_SM_SET_INIT_KEY,
+                    initiator_key.into(),
+                    std::mem::size_of::<u8>() as _,
+                )
+            })
+            .expect("initiator_key");
+        }
+
+        if let Some(responder_key) = config.responder_key {
+            esp!(unsafe {
+                esp_ble_gap_set_security_param(
+                    esp_ble_sm_param_t_ESP_BLE_SM_SET_RSP_KEY,
+                    responder_key.into(),
+                    std::mem::size_of::<u8>() as _,
+                )
+            })
+            .expect("responder_key");
+        }
+        if let Some(max_key_size) = config.max_key_size {
+            esp!(unsafe {
+                esp_ble_gap_set_security_param(
+                    esp_ble_sm_param_t_ESP_BLE_SM_MAX_KEY_SIZE,
+                    max_key_size.to_le_bytes().as_mut_ptr() as _,
+                    std::mem::size_of::<u8>() as _,
+                )
+            })
+            .expect("max key size");
+        }
+        if let Some(min_key_size) = config.min_key_size {
+            esp!(unsafe {
+                esp_ble_gap_set_security_param(
+                    esp_ble_sm_param_t_ESP_BLE_SM_MIN_KEY_SIZE,
+                    min_key_size.to_le_bytes().as_mut_ptr() as _,
+                    std::mem::size_of::<u8>() as _,
+                )
+            })
+            .expect("min key size");
+        }
+        if let Some(passkey) = config.static_passkey {
+            esp!(unsafe {
+                esp_ble_gap_set_security_param(
+                    esp_ble_sm_param_t_ESP_BLE_SM_SET_STATIC_PASSKEY,
+                    passkey.to_le_bytes().as_mut_ptr() as _,
+                    std::mem::size_of::<u32>() as _,
+                )
+            })
+            .expect("set static passkey");
+        }
+        esp!(unsafe {
+            esp_ble_gap_set_security_param(
+                esp_ble_sm_param_t_ESP_BLE_SM_ONLY_ACCEPT_SPECIFIED_SEC_AUTH,
+                (if config.only_accept_specified_auth {
+                    1_u8
+                } else {
+                    0_u8
+                })
+                .to_le_bytes()
+                .as_mut_ptr() as _,
+                std::mem::size_of::<u8>() as _,
+            )
+        })
+        .expect("only accept spec auth");
+        esp!(unsafe {
+            esp_ble_gap_set_security_param(
+                esp_ble_sm_param_t_ESP_BLE_SM_OOB_SUPPORT,
+                (if config.enable_oob { 1_u8 } else { 0_u8 })
+                    .to_le_bytes()
+                    .as_mut_ptr() as _,
+                std::mem::size_of::<u8>() as _,
+            )
+        })
+        .expect("oob support");
+
+        insert_gap_cb(GapCallbacks::SecurityRequest, |sec_req| {
+            if let GapEvent::SecurityRequest(mut sec_req) = sec_req {
+                info!("SecurityRequest");
+                match esp!(unsafe {
+                    esp_ble_gap_security_rsp(sec_req.ble_req.bd_addr.as_mut_ptr(), true)
+                }) {
+                    Ok(()) => info!("Security set"),
+                    Err(err) => warn!("Error setting security: {}", err),
+                }
+            }
         });
-        GAP_CALLBACKS.lock().as_mut().and_then(move |m| {
-            m.insert(
-                GapCallbacks::PasskeyNotify,
-                Box::new(|notify| {
-                    if let GapEvent::PasskeyNotification(notify) = notify {
-                        info!("Passkey: {:?}", unsafe { notify.ble_key.key_type })
-                    }
-                }),
-            )
+        insert_gap_cb(GapCallbacks::PasskeyNotify, |notify| {
+            if let GapEvent::PasskeyNotification(notify) = notify {
+                info!("Passkey: {:?}", unsafe { notify.ble_key.key_type })
+            }
         });
-        GAP_CALLBACKS.lock().as_mut().and_then(|m| {
-            m.insert(
-                GapCallbacks::KeyEvent,
-                Box::new(|key| {
-                    if let GapEvent::Key(key) = key {
-                        info!("Key: {:?}", unsafe { key.ble_key.key_type });
-                    }
-                }),
-            )
+        insert_gap_cb(GapCallbacks::KeyEvent, |key| {
+            if let GapEvent::Key(key) = key {
+                info!("Key: {:?}", unsafe { key.ble_key.key_type });
+            }
         });
-        GAP_CALLBACKS.lock().as_mut().and_then(|m| {
-            m.insert(
-                GapCallbacks::AuthComplete,
-                Box::new(|auth| {
-                    if let GapEvent::AuthenticationComplete(auth) = auth {
-                        info!("Auth: {:?}", unsafe { auth.auth_cmpl.success });
-                    }
-                }),
-            )
+        insert_gap_cb(GapCallbacks::AuthComplete, |auth| {
+            if let GapEvent::AuthenticationComplete(auth) = auth {
+                info!("Auth: {:?}", unsafe { auth.auth_cmpl.success });
+            }
         });
 
-        GAP_CALLBACKS.lock().as_mut().and_then(|m| {
-            m.insert(
-                GapCallbacks::NumericComparisonRequest,
-                Box::new(|_| {
-                    info!("Numeric comparison request");
-                }),
-            )
+        insert_gap_cb(GapCallbacks::NumericComparisonRequest, |ble_sec| {
+            info!("Numeric comparison request");
+            if let GapEvent::NumericComparisonRequest(mut ble_sec) = ble_sec {
+                esp!(unsafe { esp_ble_confirm_reply(ble_sec.ble_req.bd_addr.as_mut_ptr(), true) })
+                    .expect("Numeric comparison request complete");
+            }
         });
+
         Ok(())
+    }
+
+    pub fn configure_gatt_security(
+        mut remote_bda: [u8; ESP_BD_ADDR_LEN as _],
+        encryption_config: BleEncryption,
+    ) {
+        esp!(unsafe { esp_ble_set_encryption(remote_bda.as_mut_ptr(), encryption_config as u32) })
+            .expect("Unable to set security level");
     }
 }
 
@@ -720,7 +809,7 @@ pub fn send(
     esp!(unsafe {
         rsp.handle = handle;
         rsp.attr_value.len = data.len() as u16;
-        if data.len() > 0 {
+        if !data.is_empty() {
             rsp.attr_value.value[..data.len()].copy_from_slice(data);
         }
 

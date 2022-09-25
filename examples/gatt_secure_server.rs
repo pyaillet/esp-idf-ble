@@ -3,10 +3,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use esp_idf_ble::advertise::AdvertiseData;
 use esp_idf_ble::{
-    AttributeValue, AutoResponse, BtUuid, EspBle, GattCharacteristic, GattDescriptor, GattService,
-    GattServiceEvent,
+    AdvertiseData, AttributeValue, AutoResponse, BleEncryption, BtUuid, EspBle, GattCharacteristic,
+    GattDescriptor, GattService, GattServiceEvent, SecurityConfig, AuthenticationRequest, IOCapabilities,
 };
 use esp_idf_hal::delay;
 // use esp_idf_hal::prelude::*;
@@ -39,14 +38,20 @@ fn main() {
 
     let mut ble = EspBle::new("ESP32".into(), default_nvs).unwrap();
 
+    let security_config = SecurityConfig {
+        auth_req_mode: AuthenticationRequest::SecureMitmBonding,
+        io_capabilities: IOCapabilities::DisplayOnly,
+        ..Default::default()
+    };
+
+    ble.configure_security(security_config).expect("Unable to configure BLE Security");
+
     let (s, r) = sync_channel(1);
 
     ble.register_gatt_service_application(1, move |gatts_if, reg| {
         if let GattServiceEvent::Register(reg) = reg {
             info!("Service registered with {reg:?}");
             s.send(gatts_if).expect("Unable to send result");
-        } else {
-            warn!("What are you doing here??");
         }
     })
     .expect("Unable to register service");
@@ -58,6 +63,12 @@ fn main() {
     info!("GattService to be created: {svc:?}");
 
     let gatts_if = r.recv().expect("Unable to receive value");
+
+    ble.register_connect_handler(gatts_if, move |_gatts_if, connect| {
+        if let GattServiceEvent::Connect(connect) = connect {
+            EspBle::configure_gatt_security(connect.remote_bda, BleEncryption::EncryptionMitm);
+        }
+    });
 
     let (s, r) = sync_channel(1);
 
@@ -75,8 +86,11 @@ fn main() {
     let svc_handle = r.recv().expect("Unable to receive value");
 
     ble.start_service(svc_handle, |_, start| {
-
-        if let GattServiceEvent::StartComplete(esp_ble_gatts_cb_param_t_gatts_start_evt_param { service_handle, .. }) = start {
+        if let GattServiceEvent::StartComplete(esp_ble_gatts_cb_param_t_gatts_start_evt_param {
+            service_handle,
+            ..
+        }) = start
+        {
             info!("Service started for handle: {service_handle}");
         }
     })
@@ -96,7 +110,10 @@ fn main() {
     let (s, r) = sync_channel(1);
 
     ble.add_characteristic(svc_handle, charac, move |_, add_char| {
-        if let GattServiceEvent::AddCharacteristicComplete(esp_ble_gatts_cb_param_t_gatts_add_char_evt_param { attr_handle, .. }) = add_char {
+        if let GattServiceEvent::AddCharacteristicComplete(
+            esp_ble_gatts_cb_param_t_gatts_add_char_evt_param { attr_handle, .. },
+        ) = add_char
+        {
             info!("Attr added with handle: {attr_handle}");
             s.send(attr_handle).expect("Unable to send value");
         }
@@ -115,7 +132,10 @@ fn main() {
         ESP_GATT_PERM_READ as _,
     );
     ble.add_descriptor(svc_handle, cdesc, |_, add_desc| {
-        if let GattServiceEvent::AddDescriptorComplete(esp_ble_gatts_cb_param_t_gatts_add_char_descr_evt_param { attr_handle, .. }) = add_desc {
+        if let GattServiceEvent::AddDescriptorComplete(
+            esp_ble_gatts_cb_param_t_gatts_add_char_descr_evt_param { attr_handle, .. },
+        ) = add_desc
+        {
             info!("Descriptor added with handle: {attr_handle}");
         }
     })
@@ -143,9 +163,7 @@ fn main() {
                 warn!("Unsupported write");
             } else {
                 let value = unsafe { std::slice::from_raw_parts(write.value, write.len as usize) };
-                info!(
-                    "Write event received for {char_attr_handle} with: {value:?}"
-                );
+                info!("Write event received for {char_attr_handle} with: {value:?}");
 
                 if write.need_rsp {
                     esp_idf_ble::send(
@@ -161,9 +179,6 @@ fn main() {
             }
         }
     });
-
-    ble.configure_security(gatts_if, esp_ble_sec_act_t_ESP_BLE_SEC_ENCRYPT_MITM)
-        .expect("Result, unable to configure security");
 
     let adv_data = AdvertiseData {
         include_name: true,

@@ -3,11 +3,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayMs;
-use esp_idf_ble::advertise::AdvertiseData;
 use esp_idf_ble::{
-    AttributeValue, AutoResponse, BtUuid, EspBle, GattCharacteristic, GattDescriptor, GattService,
-    GattServiceEvent, ServiceUuid,
+    AdvertiseData, AttributeValue, AutoResponse, BtUuid, EspBle, GattCharacteristic,
+    GattDescriptor, GattService, GattServiceEvent, ServiceUuid,
 };
 use esp_idf_hal::delay;
 // use esp_idf_hal::prelude::*;
@@ -61,6 +59,12 @@ fn main() {
     let gatts_if = r.recv().expect("Unable to receive value");
 
     let (s, r) = sync_channel(1);
+
+    ble.register_connect_handler(gatts_if, |_gatts_if, connect| {
+        if let GattServiceEvent::Connect(connect) = connect {
+            info!("Connect event: {:?}", connect);
+        }
+    });
 
     ble.create_service(gatts_if, svc, move |gatts_if, create| {
         if let GattServiceEvent::Create(create) = create {
@@ -204,5 +208,4 @@ fn main() {
     loop {
         thread::sleep(Duration::from_millis(5000));
     }
-
 }
