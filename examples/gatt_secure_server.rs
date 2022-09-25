@@ -4,8 +4,8 @@ use std::thread;
 use std::time::Duration;
 
 use esp_idf_ble::{
-    AdvertiseData, AttributeValue, AutoResponse, BtUuid, EspBle, GattCharacteristic,
-    GattDescriptor, GattService, GattServiceEvent, ServiceUuid,
+    AdvertiseData, AttributeValue, AutoResponse, BleEncryption, BtUuid, EspBle, GattCharacteristic,
+    GattDescriptor, GattService, GattServiceEvent, SecurityConfig, AuthenticationRequest, IOCapabilities,
 };
 use esp_idf_hal::delay;
 // use esp_idf_hal::prelude::*;
@@ -38,41 +38,47 @@ fn main() {
 
     let mut ble = EspBle::new("ESP32".into(), default_nvs).unwrap();
 
+    let security_config = SecurityConfig {
+        auth_req_mode: AuthenticationRequest::SecureMitmBonding,
+        io_capabilities: IOCapabilities::DisplayOnly,
+        ..Default::default()
+    };
+
+    ble.configure_security(security_config).expect("Unable to configure BLE Security");
+
     let (s, r) = sync_channel(1);
 
     ble.register_gatt_service_application(1, move |gatts_if, reg| {
         if let GattServiceEvent::Register(reg) = reg {
-            info!("Service registered with {:?}", reg);
+            info!("Service registered with {reg:?}");
             s.send(gatts_if).expect("Unable to send result");
-        } else {
-            warn!("What are you doing here??");
         }
     })
     .expect("Unable to register service");
 
-    let svc_uuid = BtUuid::Uuid16(ServiceUuid::Battery as u16);
+    let svc_uuid = BtUuid::Uuid16(0x00FF);
 
     let svc = GattService::new_primary(svc_uuid, 4, 1);
 
-    info!("GattService to be created: {:?}", svc);
+    info!("GattService to be created: {svc:?}");
 
     let gatts_if = r.recv().expect("Unable to receive value");
 
-    let (s, r) = sync_channel(1);
-
-    ble.register_connect_handler(gatts_if, |_gatts_if, connect| {
+    ble.register_connect_handler(gatts_if, move |_gatts_if, connect| {
         if let GattServiceEvent::Connect(connect) = connect {
-            info!("Connect event: {:?}", connect);
+            EspBle::configure_gatt_security(connect.remote_bda, BleEncryption::EncryptionMitm);
         }
     });
 
+    let (s, r) = sync_channel(1);
+
     ble.create_service(gatts_if, svc, move |gatts_if, create| {
-        if let GattServiceEvent::Create(create) = create {
+
+        if let GattServiceEvent::Create(esp_ble_gatts_cb_param_t_gatts_create_evt_param { status, service_handle, .. }) = create {
             info!(
-                "Service created with {{ \tgatts_if: {}\tstatus: {}\n\thandle: {}\n}}",
-                gatts_if, create.status, create.service_handle
+                "Service created with {{ \tgatts_if: {gatts_if}\tstatus: {status}\n\thandle: {service_handle}\n}}"
             );
-            s.send(create.service_handle).expect("Unable to send value");
+            s.send(service_handle).expect("Unable to send value");
         }
     })
     .expect("Unable to create service");
@@ -80,8 +86,12 @@ fn main() {
     let svc_handle = r.recv().expect("Unable to receive value");
 
     ble.start_service(svc_handle, |_, start| {
-        if let GattServiceEvent::StartComplete(start) = start {
-            info!("Service started for handle: {}", start.service_handle);
+        if let GattServiceEvent::StartComplete(esp_ble_gatts_cb_param_t_gatts_start_evt_param {
+            service_handle,
+            ..
+        }) = start
+        {
+            info!("Service started for handle: {service_handle}");
         }
     })
     .expect("Unable to start ble service");
@@ -91,7 +101,7 @@ fn main() {
     ]);
     let charac = GattCharacteristic::new(
         BtUuid::Uuid16(0xff01),
-        (ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE) as _,
+        (ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE_ENC_MITM) as _,
         (ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE) as _,
         attr_value,
         AutoResponse::ByApp,
@@ -100,9 +110,12 @@ fn main() {
     let (s, r) = sync_channel(1);
 
     ble.add_characteristic(svc_handle, charac, move |_, add_char| {
-        if let GattServiceEvent::AddCharacteristicComplete(add_char) = add_char {
-            info!("Attr added with handle: {}", add_char.attr_handle);
-            s.send(add_char.attr_handle).expect("Unable to send value");
+        if let GattServiceEvent::AddCharacteristicComplete(
+            esp_ble_gatts_cb_param_t_gatts_add_char_evt_param { attr_handle, .. },
+        ) = add_char
+        {
+            info!("Attr added with handle: {attr_handle}");
+            s.send(attr_handle).expect("Unable to send value");
         }
     })
     .expect("Unable to add characteristic");
@@ -112,15 +125,18 @@ fn main() {
     let data = ble
         .read_attribute_value(char_attr_handle)
         .expect("Unable to read characteristic value");
-    info!("Characteristic values: {:?}", data);
+    info!("Characteristic values: {data:?}");
 
     let cdesc = GattDescriptor::new(
         BtUuid::Uuid16(ESP_GATT_UUID_CHAR_CLIENT_CONFIG as u16),
         ESP_GATT_PERM_READ as _,
     );
     ble.add_descriptor(svc_handle, cdesc, |_, add_desc| {
-        if let GattServiceEvent::AddDescriptorComplete(add_desc) = add_desc {
-            info!("Descriptor added with handle: {}", add_desc.attr_handle);
+        if let GattServiceEvent::AddDescriptorComplete(
+            esp_ble_gatts_cb_param_t_gatts_add_char_descr_evt_param { attr_handle, .. },
+        ) = add_desc
+        {
+            info!("Descriptor added with handle: {attr_handle}");
         }
     })
     .expect("Unable to add characteristic");
@@ -147,10 +163,7 @@ fn main() {
                 warn!("Unsupported write");
             } else {
                 let value = unsafe { std::slice::from_raw_parts(write.value, write.len as usize) };
-                info!(
-                    "Write event received for {} with: {:?}",
-                    char_attr_handle, value
-                );
+                info!("Write event received for {char_attr_handle} with: {value:?}");
 
                 if write.need_rsp {
                     esp_idf_ble::send(
@@ -206,6 +219,6 @@ fn main() {
     .expect("Failed to start advertising");
 
     loop {
-        thread::sleep(Duration::from_millis(5000));
+        thread::sleep(Duration::from_millis(500));
     }
 }

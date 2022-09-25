@@ -18,7 +18,7 @@ pub enum GapEvent {
     OOBRequest,
     LocalIR,
     LocalER,
-    NumericComparisonRequest,
+    NumericComparisonRequest(esp_ble_sec_t),
     AdvertisingStopComplete(esp_ble_gap_cb_param_t_ble_adv_stop_cmpl_evt_param),
     ScanStopComplete(esp_ble_gap_cb_param_t_ble_scan_stop_cmpl_evt_param),
     SetStaticRandomAddressComplete(esp_ble_gap_cb_param_t_ble_set_rand_cmpl_evt_param),
@@ -97,7 +97,7 @@ impl std::fmt::Debug for GapEvent {
                 GapEvent::OOBRequest => "OOBRequest",
                 GapEvent::LocalIR => "LocalIR",
                 GapEvent::LocalER => "LocalER",
-                GapEvent::NumericComparisonRequest => "NumericComparisonRequest",
+                GapEvent::NumericComparisonRequest(_) => "NumericComparisonRequest",
                 GapEvent::AdvertisingStopComplete(_) => "AdvertisingStopComplete",
                 GapEvent::ScanStopComplete(_) => "ScanStopComplete",
                 GapEvent::SetStaticRandomAddressComplete(_) => "SetStaticRandomAddressComplete",
@@ -164,7 +164,9 @@ impl GapEvent {
             esp_gap_ble_cb_event_t_ESP_GAP_BLE_OOB_REQ_EVT => GapEvent::OOBRequest,
             esp_gap_ble_cb_event_t_ESP_GAP_BLE_LOCAL_IR_EVT => GapEvent::LocalIR,
             esp_gap_ble_cb_event_t_ESP_GAP_BLE_LOCAL_ER_EVT => GapEvent::LocalER,
-            esp_gap_ble_cb_event_t_ESP_GAP_BLE_NC_REQ_EVT => GapEvent::NumericComparisonRequest,
+            esp_gap_ble_cb_event_t_ESP_GAP_BLE_NC_REQ_EVT => {
+                GapEvent::NumericComparisonRequest(param.ble_security)
+            }
             esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT => {
                 GapEvent::AdvertisingStopComplete(param.adv_stop_cmpl)
             }
