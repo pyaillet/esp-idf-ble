@@ -1,7 +1,5 @@
 use std::ops::BitOr;
 
-use esp_idf_sys::c_types::c_void;
-
 #[derive(Default)]
 #[repr(u8)]
 pub enum IOCapabilities {
@@ -11,12 +9,6 @@ pub enum IOCapabilities {
     KeyboardOnly = 2,
     NoInputNoOutput = 3,
     Keyboard = 4,
-}
-
-impl From<IOCapabilities> for *mut c_void {
-    fn from(auth: IOCapabilities) -> Self {
-        (auth as u8).to_le_bytes().as_mut_ptr() as _
-    }
 }
 
 #[derive(Default)]
@@ -31,12 +23,6 @@ pub enum AuthenticationRequest {
     SecureBonding = 0b0000_0101,
     SecureMitm = 0b0000_0110,
     SecureMitmBonding = 0b0000_0111,
-}
-
-impl From<AuthenticationRequest> for *mut c_void {
-    fn from(auth: AuthenticationRequest) -> Self {
-        (auth as u8).to_le_bytes().as_mut_ptr() as _
-    }
 }
 
 #[repr(u8)]
@@ -80,12 +66,6 @@ impl From<u8> for KeyMask {
             0b0000_1111 => KeyMask::Inner1111,
             _ => unimplemented!("This does not correspond to a valid KeyMask")
         }
-    }
-}
-
-impl From<KeyMask> for *mut c_void {
-    fn from(auth: KeyMask) -> Self {
-        (auth as u8).to_le_bytes().as_mut_ptr() as _
     }
 }
 

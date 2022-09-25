@@ -12,7 +12,7 @@ use advertise::RawAdvertiseData;
 
 use esp_idf_svc::nvs::EspDefaultNvs;
 
-use esp_idf_sys::*;
+use esp_idf_sys::{c_types::c_void, *};
 
 use esp_idf_hal::mutex::Mutex;
 
@@ -654,11 +654,11 @@ impl EspBle {
         insert_gatt_cb_kept(GattCallbacks::Write(attr_handle), cb);
     }
 
-    pub fn configure_security(&self, config: SecurityConfig) -> Result<(), EspError> {
+    pub fn configure_security(&self, mut config: SecurityConfig) -> Result<(), EspError> {
         esp!(unsafe {
             esp_ble_gap_set_security_param(
                 esp_ble_sm_param_t_ESP_BLE_SM_AUTHEN_REQ_MODE,
-                config.auth_req_mode.into(),
+                &mut config.auth_req_mode as *mut _ as *mut c_void,
                 std::mem::size_of::<u8>() as _,
             )
         })
@@ -667,77 +667,78 @@ impl EspBle {
         esp!(unsafe {
             esp_ble_gap_set_security_param(
                 esp_ble_sm_param_t_ESP_BLE_SM_IOCAP_MODE,
-                config.io_capabilities.into(),
+                &mut config.io_capabilities as *mut _ as *mut c_void,
                 std::mem::size_of::<u8>() as _,
             )
         })
         .expect("sm iocap mode");
 
-        if let Some(initiator_key) = config.initiator_key {
+        if let Some(mut initiator_key) = config.initiator_key {
             esp!(unsafe {
                 esp_ble_gap_set_security_param(
                     esp_ble_sm_param_t_ESP_BLE_SM_SET_INIT_KEY,
-                    initiator_key.into(),
+                    &mut initiator_key as *mut _ as *mut c_void,
                     std::mem::size_of::<u8>() as _,
                 )
             })
             .expect("initiator_key");
         }
 
-        if let Some(responder_key) = config.responder_key {
+        if let Some(mut responder_key) = config.responder_key {
             esp!(unsafe {
                 esp_ble_gap_set_security_param(
                     esp_ble_sm_param_t_ESP_BLE_SM_SET_RSP_KEY,
-                    responder_key.into(),
+                    &mut responder_key as *mut _ as *mut c_void,
                     std::mem::size_of::<u8>() as _,
                 )
             })
             .expect("responder_key");
         }
-        if let Some(max_key_size) = config.max_key_size {
+        if let Some(mut max_key_size) = config.max_key_size {
             esp!(unsafe {
                 esp_ble_gap_set_security_param(
                     esp_ble_sm_param_t_ESP_BLE_SM_MAX_KEY_SIZE,
-                    max_key_size.to_le_bytes().as_mut_ptr() as _,
+                    &mut max_key_size as *mut _ as *mut c_void,
                     std::mem::size_of::<u8>() as _,
                 )
             })
             .expect("max key size");
         }
-        if let Some(min_key_size) = config.min_key_size {
+        if let Some(mut min_key_size) = config.min_key_size {
             esp!(unsafe {
                 esp_ble_gap_set_security_param(
                     esp_ble_sm_param_t_ESP_BLE_SM_MIN_KEY_SIZE,
-                    min_key_size.to_le_bytes().as_mut_ptr() as _,
+                    &mut min_key_size as *mut _ as *mut c_void,
                     std::mem::size_of::<u8>() as _,
                 )
             })
             .expect("min key size");
         }
         if let Some(passkey) = config.static_passkey {
+            let mut passkey = passkey.to_ne_bytes();
             esp!(unsafe {
                 esp_ble_gap_set_security_param(
                     esp_ble_sm_param_t_ESP_BLE_SM_SET_STATIC_PASSKEY,
-                    passkey.to_le_bytes().as_mut_ptr() as _,
+                    &mut passkey as *mut _ as *mut c_void,
                     std::mem::size_of::<u32>() as _,
                 )
             })
             .expect("set static passkey");
         }
         esp!(unsafe {
+            let mut only_accept_specified_auth = u8::from(config.only_accept_specified_auth);
             esp_ble_gap_set_security_param(
                 esp_ble_sm_param_t_ESP_BLE_SM_ONLY_ACCEPT_SPECIFIED_SEC_AUTH,
-                u8::from(config.only_accept_specified_auth)
-                    .to_le_bytes()
-                    .as_mut_ptr() as _,
+                &mut only_accept_specified_auth as *mut _ as *mut c_void,
                 std::mem::size_of::<u8>() as _,
             )
         })
         .expect("only accept spec auth");
         esp!(unsafe {
+            let mut enable_oob = u8::from(config.enable_oob);
             esp_ble_gap_set_security_param(
                 esp_ble_sm_param_t_ESP_BLE_SM_OOB_SUPPORT,
-                u8::from(config.enable_oob).to_le_bytes().as_mut_ptr() as _,
+                &mut enable_oob as *mut _ as *mut c_void,
                 std::mem::size_of::<u8>() as _,
             )
         })

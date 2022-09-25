@@ -39,8 +39,9 @@ fn main() {
     let mut ble = EspBle::new("ESP32".into(), default_nvs).unwrap();
 
     let security_config = SecurityConfig {
-        auth_req_mode: AuthenticationRequest::SecureMitmBonding,
+        auth_req_mode: AuthenticationRequest::MitmBonding,
         io_capabilities: IOCapabilities::DisplayOnly,
+        static_passkey: Some(123456),
         ..Default::default()
     };
 
