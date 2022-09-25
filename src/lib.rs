@@ -727,13 +727,9 @@ impl EspBle {
         esp!(unsafe {
             esp_ble_gap_set_security_param(
                 esp_ble_sm_param_t_ESP_BLE_SM_ONLY_ACCEPT_SPECIFIED_SEC_AUTH,
-                (if config.only_accept_specified_auth {
-                    1_u8
-                } else {
-                    0_u8
-                })
-                .to_le_bytes()
-                .as_mut_ptr() as _,
+                u8::from(config.only_accept_specified_auth)
+                    .to_le_bytes()
+                    .as_mut_ptr() as _,
                 std::mem::size_of::<u8>() as _,
             )
         })
@@ -741,9 +737,7 @@ impl EspBle {
         esp!(unsafe {
             esp_ble_gap_set_security_param(
                 esp_ble_sm_param_t_ESP_BLE_SM_OOB_SUPPORT,
-                (if config.enable_oob { 1_u8 } else { 0_u8 })
-                    .to_le_bytes()
-                    .as_mut_ptr() as _,
+                u8::from(config.enable_oob).to_le_bytes().as_mut_ptr() as _,
                 std::mem::size_of::<u8>() as _,
             )
         })
