@@ -164,7 +164,7 @@ impl From<&AdvertiseType> for Vec<u8> {
                 v
             }
             AdvertiseType::Appearance(cat) => {
-                let cat: i32 = cat.clone().into();
+                let cat: i32 = (*cat).into();
                 vec![0x02, 0x19, cat as u8]
             }
             AdvertiseType::TxPower(_pow) => {

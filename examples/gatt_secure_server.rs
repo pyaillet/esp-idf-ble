@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use esp_idf_ble::{
-    AdvertiseData, AttributeValue, AutoResponse, BleEncryption, BtUuid, EspBle, GattCharacteristic,
+    AdvertiseData, AttributeValue, AutoResponse, BtUuid, EspBle, GattCharacteristic,
     GattDescriptor, GattService, GattServiceEvent, SecurityConfig, AuthenticationRequest, IOCapabilities, KeyMask,
 };
 use esp_idf_hal::delay;
