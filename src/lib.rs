@@ -115,12 +115,13 @@ unsafe extern "C" fn gap_event_handler(
             GapEvent::Key(_) => Some(&GapCallbacks::KeyEvent),
             GapEvent::AuthenticationComplete(_) => Some(&GapCallbacks::AuthComplete),
             GapEvent::NumericComparisonRequest(_) => Some(&GapCallbacks::NumericComparisonRequest),
+            GapEvent::SecurityRequest(_) => Some(&GapCallbacks::SecurityRequest),
             _ => {
                 warn!("Unimplemented {:?}", event);
                 None
             }
         })
-        .and_then(|cb_key| m.remove(cb_key))
+        .and_then(|cb_key| m.get(cb_key))
     }) {
         cb(event);
     } else {
@@ -771,18 +772,26 @@ impl EspBle {
             }
         });
 
+        insert_gap_cb(GapCallbacks::SecurityRequest, |sec_req| {
+            if let GapEvent::SecurityRequest(sec_req) = sec_req {
+                let mut ble_sec_req: esp_ble_sec_req_t = unsafe { sec_req.ble_req };
+                info!("SecurityRequest: {:?}", ble_sec_req);
+                unsafe { esp_ble_gap_security_rsp(ble_sec_req.bd_addr.as_mut_ptr(), true) };
+            }
+        });
+
         insert_gap_cb(GapCallbacks::NumericComparisonRequest, |ble_sec| {
             info!("Numeric comparison request");
             if let GapEvent::NumericComparisonRequest(mut ble_sec) = ble_sec {
                 esp!(unsafe { esp_ble_confirm_reply(ble_sec.ble_req.bd_addr.as_mut_ptr(), true) })
-                    .expect("Numeric comparison request complete");
+                    .expect("Unable to complete numeric comparison request");
             }
         });
 
         Ok(())
     }
 
-    pub fn configure_gatt_security(
+    pub fn configure_gatt_encryption(
         mut remote_bda: [u8; ESP_BD_ADDR_LEN as _],
         encryption_config: BleEncryption,
     ) {

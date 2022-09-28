@@ -3,7 +3,7 @@ use esp_idf_sys::*;
 
 #[allow(clippy::upper_case_acronyms)]
 #[repr(u16)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum AppearanceCategory {
     Unknown = 0x00,
     Phone,

@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use esp_idf_ble::{
     AdvertiseData, AttributeValue, AutoResponse, BleEncryption, BtUuid, EspBle, GattCharacteristic,
-    GattDescriptor, GattService, GattServiceEvent, SecurityConfig, AuthenticationRequest, IOCapabilities,
+    GattDescriptor, GattService, GattServiceEvent, SecurityConfig, AuthenticationRequest, IOCapabilities, KeyMask,
 };
 use esp_idf_hal::delay;
 // use esp_idf_hal::prelude::*;
@@ -39,8 +39,13 @@ fn main() {
     let mut ble = EspBle::new("ESP32".into(), default_nvs).unwrap();
 
     let security_config = SecurityConfig {
-        auth_req_mode: AuthenticationRequest::MitmBonding,
-        io_capabilities: IOCapabilities::DisplayOnly,
+        auth_req_mode: AuthenticationRequest::SecureMitmBonding,
+        io_capabilities: IOCapabilities::DisplayYesNo,
+        max_key_size: Some(16),
+        only_accept_specified_auth: false,
+        enable_oob: false,
+        responder_key: Some(KeyMask::IdentityResolvingKey | KeyMask::EncryptionKey),
+        initiator_key: Some(KeyMask::IdentityResolvingKey | KeyMask::EncryptionKey),
         static_passkey: Some(123456),
         ..Default::default()
     };
@@ -67,7 +72,7 @@ fn main() {
 
     ble.register_connect_handler(gatts_if, move |_gatts_if, connect| {
         if let GattServiceEvent::Connect(connect) = connect {
-            EspBle::configure_gatt_security(connect.remote_bda, BleEncryption::EncryptionMitm);
+            info!("Connection from {:?}", connect.remote_bda);
         }
     });
 
@@ -182,6 +187,7 @@ fn main() {
     });
 
     let adv_data = AdvertiseData {
+        appearance: esp_idf_ble::AppearanceCategory::Watch,
         include_name: true,
         include_txpower: false,
         min_interval: 6,
@@ -199,6 +205,7 @@ fn main() {
     .expect("Failed to configure advertising data");
 
     let scan_rsp_data = AdvertiseData {
+        appearance: esp_idf_ble::AppearanceCategory::Watch,
         include_name: false,
         include_txpower: true,
         set_scan_rsp: true,
