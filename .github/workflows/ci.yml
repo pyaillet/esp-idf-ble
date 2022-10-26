@@ -43,6 +43,7 @@ jobs:
         with:
           command: build
           args: --release --all-features --examples --target=riscv32imc-esp-espidf
+          use-cross: true
 
   clippy:
     runs-on: ubuntu-latest
@@ -62,6 +63,7 @@ jobs:
           toolchain: nightly
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features --examples --target=riscv32imc-esp-espidf
+          use-cross: true
 
   doc:
     runs-on: ubuntu-latest
@@ -80,6 +82,7 @@ jobs:
         with:
           command: doc
           args: --target=riscv32imc-esp-espidf
+          use-cross: true
 
   security-audit:
     runs-on: ubuntu-latest
