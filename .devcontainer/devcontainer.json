@@ -1,16 +1,16 @@
 {
     "name": "esp-idf-ble",
     // Select between image and build propieties to pull or build the image.
-    // "image": "docker.io/espressif/idf-rust:esp32_v4.4_1.64.0.0",
-    "build": {
-      "dockerfile": "Dockerfile",
-      "args": {
-        "CONTAINER_USER": "esp",
-        "CONTAINER_GROUP": "esp",
-        "ESP_IDF_VERSION": "release/v4.4",
-        "ESP_BOARD": "all"
-      }
-    },
+    "image": "docker.io/espressif/idf-rust:esp32_v4.4_1.64.0.0",
+    // "build": {
+    //   "dockerfile": "Dockerfile",
+    //   "args": {
+    //     "CONTAINER_USER": "esp",
+    //     "CONTAINER_GROUP": "esp",
+    //     "ESP_IDF_VERSION": "release/v4.4",
+    //     "ESP_BOARD": "all"
+    //   }
+    // },
     "settings": {
       "editor.fontFamily": "FiraCode Nerd Font Mono",
       "editor.fontSize": 16,
