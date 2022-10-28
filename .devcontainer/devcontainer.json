@@ -45,6 +45,6 @@
       9333,
       8000
     ],
-    "workspaceMount": "source=${localWorkspaceFolder},target=/home/esp/{{ crate_name }},type=bind,consistency=cached",
-    "workspaceFolder": "/home/esp/{{ crate_name }}"
+    "workspaceMount": "source=${localWorkspaceFolder},target=/home/esp/esp-idf-ble,type=bind,consistency=cached",
+    "workspaceFolder": "/home/esp/esp-idf-ble"
   }
