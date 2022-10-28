@@ -1,7 +1,8 @@
 {
     "name": "esp-idf-ble",
     // Select between image and build propieties to pull or build the image.
-    "image": "docker.io/espressif/idf-rust:esp32_v4.4_1.64.0.0",
+    // "image": "docker.io/espressif/idf-rust:esp32_v4.4_1.64.0.0",
+    "image": "mcr.microsoft.com/devcontainers/rust:1-bullseye",
     // "build": {
     //   "dockerfile": "Dockerfile",
     //   "args": {
