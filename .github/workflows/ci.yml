@@ -6,21 +6,21 @@ on:
     - main
 
 jobs:
-  build-nightly-xtensa:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install Rust for Xtensa
-        uses: esp-rs/xtensa-toolchain@v1.1
-        with:
-          default: true
-          ldproxy: true
-
-      - name: Release build std
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --all-features --examples
+#  build-nightly-xtensa:
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Install Rust for Xtensa
+#        uses: esp-rs/xtensa-toolchain@v1.1
+#        with:
+#          default: true
+#          ldproxy: true
+#
+#      - name: Release build std
+#        uses: actions-rs/cargo@v1
+#        with:
+#          command: build
+#          args: --release --all-features --examples
 
   build-nightly-risc:
     runs-on: ubuntu-latest
