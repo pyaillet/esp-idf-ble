@@ -6,21 +6,21 @@ on:
     - main
 
 jobs:
-#  build-nightly-xtensa:
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v2
-#      - name: Install Rust for Xtensa
-#        uses: esp-rs/xtensa-toolchain@v1.1
-#        with:
-#          default: true
-#          ldproxy: true
-#
-#      - name: Release build std
-#        uses: actions-rs/cargo@v1
-#        with:
-#          command: build
-#          args: --release --all-features --examples
+  build-nightly-xtensa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Rust for Xtensa
+        uses: esp-rs/xtensa-toolchain@v1.1
+        with:
+          default: true
+          ldproxy: true
+
+      - name: Release build std
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features --examples
 
   build-nightly-risc:
     runs-on: ubuntu-latest
@@ -43,7 +43,6 @@ jobs:
         with:
           command: build
           args: --release --all-features --examples --target=riscv32imc-esp-espidf
-          use-cross: true
 
   clippy:
     runs-on: ubuntu-latest
@@ -63,7 +62,6 @@ jobs:
           toolchain: nightly
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features --examples --target=riscv32imc-esp-espidf
-          use-cross: true
 
   doc:
     runs-on: ubuntu-latest
@@ -82,21 +80,3 @@ jobs:
         with:
           command: doc
           args: --target=riscv32imc-esp-espidf
-          use-cross: true
-
-  security-audit:
-    runs-on: ubuntu-latest
-    env:
-      RUSTUP_TOOLCHAIN: nightly
-    steps:
-      - uses: actions/checkout@v2
-      - name: Nightly
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-
-      - name: Security audit
-        uses: actions-rs/audit-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-

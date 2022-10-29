@@ -17,7 +17,6 @@ incremental = true
 [features]
 native = ["esp-idf-sys/native"]
 default = ["native"]
-experimental = ["esp-idf-svc/experimental", "esp-idf-hal/experimental", "embedded-svc/experimental"]
 
 [dependencies]
 esp-idf-sys = { version = "0.31", features = ["binstart", "std", "native"] }
