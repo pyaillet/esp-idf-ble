@@ -7,13 +7,8 @@ ENV LANG=C.UTF-8
 ARG CONTAINER_USER=gitpod
 ARG CONTAINER_GROUP=gitpod
 ARG TOOLCHAIN_VERSION=1.64.0.0
-ARG ESP_IDF_VERSION=
-{%- if espidfver == "mainline" -%}
-"master"
-{%- else -%}
-"release/v4.4"
-{%- endif %}
-ARG ESP_BOARD={{ mcu }}
+ARG ESP_IDF_VERSION="release/v4.4"
+ARG ESP_BOARD=all
 ARG INSTALL_RUST_TOOLCHAIN=install-rust-toolchain.sh
 
 # Install dependencies
