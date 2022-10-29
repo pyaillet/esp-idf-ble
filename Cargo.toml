@@ -20,16 +20,16 @@ default = ["native", "experimental"]
 experimental = ["esp-idf-svc/experimental", "esp-idf-hal/experimental", "embedded-svc/experimental"]
 
 [dependencies]
-esp-idf-sys = { version = "0.31", features = ["binstart"] }
-esp-idf-svc = "0.42"
-esp-idf-hal = "0.38"
+esp-idf-sys = { version = "0.31", features = ["binstart", "std", "native"] }
+esp-idf-svc = "0.41"
+esp-idf-hal = "0.37"
 embedded-svc = "0.21"
 embedded-hal = "0.2"
 
 log = { version = "0.4" }
 
 [build-dependencies]
-embuild = "0.30"
+embuild = "0.29"
 anyhow = "1"
 
 [package.metadata.espflash]
