@@ -6,27 +6,46 @@ use esp_idf_sys::*;
 use log::*;
 
 static DEFAULT_TAKEN: Mutex<bool> = Mutex::new(false);
+static mut BLE_INTERNAL: Option<Arc<Mutex<BleInternal>>> = None;
 
-struct BLE {
-    device_name: String,
-    nvs: Arc<EspDefaultNvs>
+extern "C" fn gap_event_handler(event: esp_gap_ble_cb_event_t, param: *const esp_ble_gap_cb_param_t) {
+
 }
 
-impl BLE {
-    pub fn new(device_name: String, nvs: Arc<EspDefaultNvs>) -> Result<BLE, EspError> {
+extern "C" fn gatts_event_handler(event: esp_gatts_cb_event_t, gatts_if: esp_gatt_if_t, param: *const esp_ble_gatts_cb_param_t) {
+
+}
+
+extern "C" fn gattc_event_handler(event: esp_gattc_cb_event_t, gattc_if: esp_gatt_if_t, param: *const esp_ble_gattc_cb_param_t) {
+
+}
+
+struct BleInternal {}
+
+struct EspBle {
+    device_name: String,
+    nvs: Arc<EspDefaultNvs>,
+    internal: Arc<Mutex<BleInternal>>
+}
+
+impl EspBle {
+    pub fn new(device_name: String, nvs: Arc<EspDefaultNvs>) -> Result<EspBle, EspError> {
         let mut taken = DEFAULT_TAKEN.lock().unwrap();
 
         if *taken {
             esp!(ESP_ERR_INVALID_STATE as i32)?;
         }
 
-        let ble = Self::init(device_name, nvs)?;
+        Self::init(device_name.clone())?;
+        let internal = Arc::new(Mutex::new(BleInternal {}));
+        let ble = EspBle { device_name, nvs, internal };
 
         *taken = true;
+
         Ok(ble)
     }
 
-    fn init(device_name: String, nvs: Arc<EspDefaultNvs>) -> Result<BLE, EspError> {
+    fn init(device_name: String) -> Result<(), EspError> {
         #[cfg(esp32)]
         let mut bt_cfg = esp_bt_controller_config_t {
             controller_task_stack_size: ESP_TASK_BT_CONTROLLER_STACK as _,
@@ -138,9 +157,11 @@ impl BLE {
 
         esp!(unsafe { esp_ble_gatt_set_local_mtu(500) })?;
 
-        let device_name_cstr = CString::new(device_name.clone()).unwrap();
+        let device_name_cstr = CString::new(device_name).unwrap();
         esp!(unsafe { esp_ble_gap_set_device_name(device_name_cstr.as_ptr() as _) })?;
 
-        Ok(BLE { device_name, nvs })
+        Ok(())
     }
+
+    pub fn advertise()
 }

@@ -1,5 +1,5 @@
 # Note: gitpod/workspace-base image references older version of CMake, it's necessary to install newer one
-FROM  gitpod/workspace-base
+FROM gitpod/workspace-base
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 
