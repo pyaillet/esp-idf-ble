@@ -19,11 +19,12 @@ native = ["esp-idf-sys/native"]
 default = ["native"]
 
 [dependencies]
-esp-idf-sys = { version = "0.31", features = ["binstart", "std", "native"] }
-esp-idf-svc = "0.42"
-esp-idf-hal = "0.38"
-embedded-svc = "0.22"
+esp-idf-sys = { version = "0.32", features = ["binstart", "std", "native"] }
+esp-idf-svc = "0.45"
+esp-idf-hal = "0.40"
+embedded-svc = "0.24"
 embedded-hal = "0.2"
+lazy_static = "1.4"
 
 log = { version = "0.4" }
 
