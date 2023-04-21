@@ -9,11 +9,9 @@ use esp_idf_ble::{
 };
 use esp_idf_hal::delay;
 // use esp_idf_hal::prelude::*;
-use esp_idf_svc::netif::EspNetifStack;
-use esp_idf_svc::nvs::EspDefaultNvs;
-use esp_idf_svc::sysloop::EspSysLoopStack;
+use esp_idf_svc::netif::{EspNetif, NetifStack};
+use esp_idf_svc::nvs::{EspDefaultNvs, EspDefaultNvsPartition};
 use esp_idf_sys::*;
-
 use embedded_hal::blocking::delay::DelayUs;
 
 use log::*;
@@ -24,13 +22,12 @@ fn main() {
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    #[allow(unused)]
-    let netif_stack = Arc::new(EspNetifStack::new().expect("Unable to init Netif Stack"));
-    #[allow(unused)]
-    let sys_loop_stack = Arc::new(EspSysLoopStack::new().expect("Unable to init sys_loop"));
 
     #[allow(unused)]
-    let default_nvs = Arc::new(EspDefaultNvs::new().unwrap());
+    let netif_stack = Arc::new(EspNetif::new(NetifStack::Eth).expect("Unable to init Netif Stack"));
+
+    #[allow(unused)]
+    let default_nvs = Arc::new(EspDefaultNvs::new( EspDefaultNvsPartition::take().unwrap(), "ble", true).unwrap());
 
     let mut delay = delay::Ets {};
 
