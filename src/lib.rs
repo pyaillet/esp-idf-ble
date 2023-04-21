@@ -5,6 +5,10 @@ mod gatt_client;
 mod gatt_server;
 mod security;
 
+#[macro_use]
+extern crate lazy_static;
+
+use std::ffi::c_void;
 use std::{collections::HashMap, ffi::CString, sync::Arc};
 
 use ::log::*;
@@ -12,9 +16,9 @@ use advertise::RawAdvertiseData;
 
 use esp_idf_svc::nvs::EspDefaultNvs;
 
-use esp_idf_sys::{c_types::c_void, *};
+use esp_idf_sys::*;
 
-use esp_idf_hal::mutex::Mutex;
+use std::sync::Mutex;
 
 pub use advertise::*;
 pub use gap::*;
@@ -24,8 +28,6 @@ pub use gatt_server::*;
 pub use security::*;
 
 static DEFAULT_TAKEN: Mutex<bool> = Mutex::new(false);
-
-type Singleton<T> = Mutex<Option<T>>;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 enum GapCallbacks {
@@ -53,24 +55,19 @@ enum GattCallbacks {
     Write(u16),                 // attr_handle
     Connect(u8),                // gatts_if
 }
-
-#[allow(clippy::type_complexity)]
-static GAP_CALLBACKS: Singleton<HashMap<GapCallbacks, Box<dyn Fn(GapEvent) + Send>>> =
-    Mutex::new(Option::None);
-#[allow(clippy::type_complexity)]
-static GATT_CALLBACKS_ONE_TIME: Singleton<
-    HashMap<GattCallbacks, Box<dyn Fn(u8, GattServiceEvent) + Send>>,
-> = Mutex::new(Option::None);
-#[allow(clippy::type_complexity)]
-static GATT_CALLBACKS_KEPT: Singleton<
-    HashMap<GattCallbacks, Box<dyn Fn(u8, GattServiceEvent) + Send>>,
-> = Mutex::new(Option::None);
-
+lazy_static! {
+    static ref GAP_CALLBACKS: Mutex<HashMap<GapCallbacks, Box<dyn Fn(GapEvent) + Send>>> =
+        Mutex::new(HashMap::new());
+    static ref GATT_CALLBACKS_ONE_TIME: Mutex<HashMap<GattCallbacks, Box<dyn Fn(u8, GattServiceEvent) + Send>>> =
+        Mutex::new(HashMap::new());
+    static ref GATT_CALLBACKS_KEPT: Mutex<HashMap<GattCallbacks, Box<dyn Fn(u8, GattServiceEvent) + Send>>> =
+        Mutex::new(HashMap::new());
+}
 fn insert_gatt_cb_kept(cb_key: GattCallbacks, cb: impl Fn(u8, GattServiceEvent) + Send + 'static) {
     GATT_CALLBACKS_KEPT
         .lock()
         .as_mut()
-        .and_then(|m| m.insert(cb_key, Box::new(cb)));
+        .and_then(|m| Ok(m.insert(cb_key, Box::new(cb)))).unwrap();
 }
 
 fn insert_gatt_cb_onetime(
@@ -80,14 +77,14 @@ fn insert_gatt_cb_onetime(
     GATT_CALLBACKS_ONE_TIME
         .lock()
         .as_mut()
-        .and_then(|m| m.insert(cb_key, Box::new(cb)));
+        .and_then(|m| Ok(m.insert(cb_key, Box::new(cb)))).unwrap();
 }
 
 fn insert_gap_cb(cb_key: GapCallbacks, cb: impl Fn(GapEvent) + Send + 'static) {
     GAP_CALLBACKS
         .lock()
         .as_mut()
-        .and_then(|m| m.insert(cb_key, Box::new(cb)));
+        .and_then(|m| Ok(m.insert(cb_key, Box::new(cb)))).unwrap();
 }
 
 unsafe extern "C" fn gap_event_handler(
@@ -97,7 +94,7 @@ unsafe extern "C" fn gap_event_handler(
     let event = GapEvent::build(event, param);
     debug!("Called gap event handler with event {{ {:#?} }}", &event);
 
-    if let Some(cb) = GAP_CALLBACKS.lock().as_mut().and_then(|m| {
+    if let Ok(Some(cb)) = GAP_CALLBACKS.lock().as_mut().map(|m| {
         (match &event {
             GapEvent::RawAdvertisingDatasetComplete(_) => {
                 Some(&GapCallbacks::RawAdvertisingDataset)
@@ -142,10 +139,10 @@ unsafe extern "C" fn gatts_event_handler(
 
     match &event {
         GattServiceEvent::Register(reg) => {
-            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
+            if let Ok(Some(cb)) = GATT_CALLBACKS_ONE_TIME
                 .lock()
                 .as_mut()
-                .and_then(|m| m.remove(&GattCallbacks::Register(reg.app_id)))
+                .and_then(|m| Ok(m.remove(&GattCallbacks::Register(reg.app_id))))
             {
                 cb(gatts_if, event);
             } else {
@@ -156,10 +153,10 @@ unsafe extern "C" fn gatts_event_handler(
             }
         }
         GattServiceEvent::Create(_) => {
-            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
+            if let Ok(Some(cb)) = GATT_CALLBACKS_ONE_TIME
                 .lock()
                 .as_mut()
-                .and_then(|m| m.remove(&GattCallbacks::Create(gatts_if)))
+                .and_then(|m| Ok(m.remove(&GattCallbacks::Create(gatts_if))))
             {
                 cb(gatts_if, event);
             } else {
@@ -170,10 +167,10 @@ unsafe extern "C" fn gatts_event_handler(
             }
         }
         GattServiceEvent::StartComplete(start) => {
-            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
+            if let Ok(Some(cb)) = GATT_CALLBACKS_ONE_TIME
                 .lock()
                 .as_mut()
-                .and_then(|m| m.remove(&GattCallbacks::Start(start.service_handle)))
+                .and_then(|m| Ok(m.remove(&GattCallbacks::Start(start.service_handle))))
             {
                 cb(gatts_if, event);
             } else {
@@ -184,11 +181,9 @@ unsafe extern "C" fn gatts_event_handler(
             }
         }
         GattServiceEvent::AddCharacteristicComplete(add_char) => {
-            if let Some(cb) = GATT_CALLBACKS_ONE_TIME
-                .lock()
-                .as_mut()
-                .and_then(|m| m.remove(&GattCallbacks::AddCharacteristic(add_char.service_handle)))
-            {
+            if let Ok(Some(cb)) = GATT_CALLBACKS_ONE_TIME.lock().as_mut().and_then(|m| {
+                Ok(m.remove(&GattCallbacks::AddCharacteristic(add_char.service_handle)))
+            }) {
                 cb(gatts_if, event);
             } else {
                 warn!(
@@ -198,10 +193,10 @@ unsafe extern "C" fn gatts_event_handler(
             }
         }
         GattServiceEvent::AddDescriptorComplete(add_desc) => {
-            if let Some(cb) = GATT_CALLBACKS_ONE_TIME.lock().as_mut().and_then(|m| {
-                m.remove(&GattCallbacks::AddCharacteristicDesc(
+            if let Ok(Some(cb)) = GATT_CALLBACKS_ONE_TIME.lock().as_mut().and_then(|m| {
+                Ok(m.remove(&GattCallbacks::AddCharacteristicDesc(
                     add_desc.service_handle,
-                ))
+                )))
             }) {
                 cb(gatts_if, event);
             } else {
@@ -223,19 +218,19 @@ unsafe extern "C" fn gatts_event_handler(
             info!("Connection from: {:?}", conn);
 
             let _ = esp!(esp_ble_gap_update_conn_params(&mut conn_params));
-            if let Some(cb) = GATT_CALLBACKS_KEPT
+            if let Ok(Some(cb)) = GATT_CALLBACKS_KEPT
                 .lock()
                 .as_mut()
-                .and_then(|m| m.get(&GattCallbacks::Connect(gatts_if)))
+                .and_then(|m| Ok(m.get(&GattCallbacks::Connect(gatts_if))))
             {
                 cb(gatts_if, event);
             }
         }
         GattServiceEvent::Read(read) => {
-            if let Some(cb) = GATT_CALLBACKS_KEPT
+            if let Ok(Some(cb)) = GATT_CALLBACKS_KEPT
                 .lock()
                 .as_mut()
-                .and_then(|m| m.get(&GattCallbacks::Read(read.handle)))
+                .and_then(|m| Ok(m.get(&GattCallbacks::Read(read.handle))))
             {
                 cb(gatts_if, event);
             } else {
@@ -246,10 +241,10 @@ unsafe extern "C" fn gatts_event_handler(
             }
         }
         GattServiceEvent::Write(write) => {
-            if let Some(cb) = GATT_CALLBACKS_KEPT
+            if let Ok(Some(cb)) = GATT_CALLBACKS_KEPT
                 .lock()
                 .as_mut()
-                .and_then(|m| m.get(&GattCallbacks::Write(write.handle)))
+                .and_then(|m| Ok(m.get(&GattCallbacks::Write(write.handle))))
             {
                 cb(gatts_if, event);
             } else {
@@ -271,20 +266,19 @@ pub struct EspBle {
 
 impl EspBle {
     pub fn new(device_name: String, nvs: Arc<EspDefaultNvs>) -> Result<EspBle, EspError> {
-        let mut taken = DEFAULT_TAKEN.lock();
+        if let Ok(mut taken) = DEFAULT_TAKEN.lock() {
+            if *taken {
+                esp!(ESP_ERR_INVALID_STATE as i32)?;
+            }
+            println!("Test");
+            let ble = Self::init(device_name, nvs)?;
 
-        if *taken {
+            *taken = true;
+            Ok(ble)
+        } else {
             esp!(ESP_ERR_INVALID_STATE as i32)?;
+            unreachable!()
         }
-
-        let ble = Self::init(device_name, nvs)?;
-
-        *GAP_CALLBACKS.lock() = Some(HashMap::new());
-        *GATT_CALLBACKS_ONE_TIME.lock() = Some(HashMap::new());
-        *GATT_CALLBACKS_KEPT.lock() = Some(HashMap::new());
-
-        *taken = true;
-        Ok(ble)
     }
 
     fn init(device_name: String, nvs: Arc<EspDefaultNvs>) -> Result<EspBle, EspError> {
@@ -312,6 +306,7 @@ impl EspBle {
             pcm_polar: CONFIG_BTDM_CTRL_PCM_POLAR_EFF as _,
             hli: BTDM_CTRL_HLI != 0,
             magic: ESP_BT_CONTROLLER_CONFIG_MAGIC_VAL,
+            dup_list_refresh_period: SCAN_DUPL_CACHE_REFRESH_PERIOD as _
         };
 
         #[cfg(esp32c3)]
@@ -381,19 +376,25 @@ impl EspBle {
             mesh_adv_size: esp_idf_sys::MESH_DUPLICATE_SCAN_CACHE_SIZE as _,
             coex_phy_coded_tx_rx_time_limit:
                 esp_idf_sys::CONFIG_BT_CTRL_COEX_PHY_CODED_TX_RX_TLIM_EFF as _,
-            hw_target_code: esp_idf_sys::BLE_HW_TARGET_CODE_ESP32S3_CHIP_ECO0 as _,
+            hw_target_code: esp_idf_sys::BLE_HW_TARGET_CODE_CHIP_ECO0 as _,
             slave_ce_len_min: esp_idf_sys::SLAVE_CE_LEN_MIN_DEFAULT as _,
             hw_recorrect_en: esp_idf_sys::AGC_RECORRECT_EN as _,
             cca_thresh: esp_idf_sys::CONFIG_BT_CTRL_HW_CCA_VAL as _,
+            ble_50_feat_supp: esp_idf_sys::BT_CTRL_50_FEATURE_SUPPORT != 0,
+            dup_list_refresh_period: esp_idf_sys::DUPL_SCAN_CACHE_REFRESH_PERIOD as _,
+            scan_backoff_upperlimitmax: esp_idf_sys::BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as _
         };
 
+        info!("Init bluetooth controller.");
         esp!(unsafe { esp_bt_controller_init(&mut bt_cfg) })?;
 
+        info!("Enable bluetooth controller.");
         esp!(unsafe { esp_bt_controller_enable(esp_bt_mode_t_ESP_BT_MODE_BLE) })?;
 
-        info!("init bluetooth");
+        info!("Init bluedroid");
         esp!(unsafe { esp_bluedroid_init() })?;
 
+        info!("Enable bluedroid");
         esp!(unsafe { esp_bluedroid_enable() })?;
 
         esp!(unsafe { esp_ble_gatts_register_callback(Some(gatts_event_handler)) })?;
