@@ -334,19 +334,22 @@ impl EspBle {
             txant_dft: esp_idf_sys::CONFIG_BT_CTRL_TX_ANTENNA_INDEX_EFF as _,
             rxant_dft: esp_idf_sys::CONFIG_BT_CTRL_RX_ANTENNA_INDEX_EFF as _,
             txpwr_dft: esp_idf_sys::CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_EFF as _,
-            cfg_mask: esp_idf_sys::CFG_NASK,
+            cfg_mask: esp_idf_sys::CFG_MASK,
             scan_duplicate_mode: esp_idf_sys::SCAN_DUPLICATE_MODE as _,
             scan_duplicate_type: esp_idf_sys::SCAN_DUPLICATE_TYPE_VALUE as _,
             normal_adv_size: esp_idf_sys::NORMAL_SCAN_DUPLICATE_CACHE_SIZE as _,
             mesh_adv_size: esp_idf_sys::MESH_DUPLICATE_SCAN_CACHE_SIZE as _,
             coex_phy_coded_tx_rx_time_limit:
                 esp_idf_sys::CONFIG_BT_CTRL_COEX_PHY_CODED_TX_RX_TLIM_EFF as _,
-            hw_target_code: esp_idf_sys::BLE_HW_TARGET_CODE_ESP32C3_CHIP_ECO0 as _,
+            hw_target_code: esp_idf_sys::BLE_HW_TARGET_CODE_CHIP_ECO0 as _,
             slave_ce_len_min: esp_idf_sys::SLAVE_CE_LEN_MIN_DEFAULT as _,
             hw_recorrect_en: esp_idf_sys::AGC_RECORRECT_EN as _,
             cca_thresh: esp_idf_sys::CONFIG_BT_CTRL_HW_CCA_VAL as _,
             coex_param_en: false,
             coex_use_hooks: false,
+            ble_50_feat_supp: esp_idf_sys::BT_CTRL_50_FEATURE_SUPPORT != 0,
+            dup_list_refresh_period: esp_idf_sys::DUPL_SCAN_CACHE_REFRESH_PERIOD as _,
+            scan_backoff_upperlimitmax: esp_idf_sys::BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as _
         };
 
         #[cfg(esp32s3)]
