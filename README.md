@@ -1,7 +1,7 @@
 ![CI](https://github.com/pyaillet/esp-idf-ble/workflows/Continuous%20integration/badge.svg)
 ![MIT/Apache-2.0 licensed](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)
 
-⚠️ Support for BLE in Rust with ESP-IDF seems to now be provided by [](https://github.com/esp-rs/esp-idf-svc/blob/master/src/bt/ble), make sure to check this.
+⚠️ Support for BLE in Rust with ESP-IDF seems to now be provided by https://github.com/esp-rs/esp-idf-svc/blob/master/src/bt/ble, make sure to check it.
 
 # esp-idf-ble
 
