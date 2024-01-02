@@ -1,6 +1,8 @@
 ![CI](https://github.com/pyaillet/esp-idf-ble/workflows/Continuous%20integration/badge.svg)
 ![MIT/Apache-2.0 licensed](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)
 
+⚠️ Support for BLE in Rust with ESP-IDF seems to now be provided by [](https://github.com/esp-rs/esp-idf-svc/blob/master/src/bt/ble), make sure to check this.
+
 # esp-idf-ble
 
 This project aims at providing a safe Rust wrapper of `esp-idf` to enable BLE on the ESP32 microcontrollers family
