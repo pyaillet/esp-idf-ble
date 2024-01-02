@@ -21,12 +21,13 @@ Then you can launch the following command to compile one of the example, flash i
 
 `cargo espflash --example <example> --monitor --speed 921600 <device> --target <target>`
 
-Targets:
+If you want to try the examples, set the target according to your device:
+- ESP32: xtensa-esp32-espidf
+- ESP32-S2: xtensa-esp32s2-espidf
+- ESP32-S3: xtensa-esp32s3-espidf
+- ESP32-C3: riscv32imc-esp-espidf
 
-- xtensa-esp32-espidf
-- xtensa-esp32s2-espidf
-- xtensa-esp32s3-espidf
-- riscv32imc-esp-espidf
+If you want to use it as a library, set the target in your own projet in the `.cargo/config.toml` file (you can check the file ()[./.cargo/config.toml] for reference)
 
 ## Examples
 
